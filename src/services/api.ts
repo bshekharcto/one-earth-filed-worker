@@ -23,7 +23,31 @@ api.interceptors.request.use((config) => {
 // --- Auth ---
 export const workerLogin = async (employeeCode: string, pin: string) => {
   const res = await api.post('/field/auth/worker-login', { employeeCode, pin });
-  return res.data;
+  let list = res.data;
+    if (Array.isArray(list)) {
+      // Find or create A-01-DEMO vehicle at index 0
+      const demoVeh = {
+        id: 'veh-01',
+        registrationNumber: 'A-01-DEMO',
+        gpsDeviceId: '864022089453483',
+        status: 'ACTIVE',
+        type: 'COMPACTOR',
+        ward: 'Ward 1 - Old City',
+        driverName: 'Ramesh Pawar',
+        driverPhone: '+91 98220 12345',
+        lat: 17.6886288,
+        lng: 75.9122672,
+        speed: 18,
+        heading: 211,
+        batteryPercent: 88,
+        lastUpdated: new Date().toISOString(),
+        isOnline: true,
+      };
+
+      list = list.filter(v => v.id !== 'veh-01' && v.registrationNumber !== 'A-01-DEMO');
+      list.unshift(demoVeh);
+    }
+    return list;
 };
 
 // --- Attendance ---
@@ -93,7 +117,7 @@ export const getPlaybackTrack = async (
   date: string
 ) => {
   try {
-    const targetVehicleId = (type === 'vehicle' && (id === '864022089453483' || id.includes('864022') || id.includes('dev-') || id === 'veh-01' || !id)) ? 'veh-01' : id;
+    const targetVehicleId = (type === 'vehicle' && (id === 'A-01-DEMO' || id === '864022089453483' || id.includes('864022') || id === 'veh-01' || !id)) ? 'veh-01' : id;
     const params = type === 'vehicle' ? { vehicleId: targetVehicleId } : { staffId: id };
     const res = await api.get('/telemetry/history', { params });
     let rawList: any[] = res.data;
@@ -122,9 +146,9 @@ export const getPlaybackTrack = async (
       let rawLat = Number(p.lat);
       let rawLng = Number(p.lng);
 
-      // Check if point is outside Solapur (e.g. Northeast India / Abu Dhabi)
+      // Keep exact Solapur coordinates if within Solapur bounds
       if (rawLat < 17.0 || rawLat > 18.2 || rawLng < 75.0 || rawLng > 76.5) {
-        // Rebase delta offset to Solapur city center
+        // Rebase non-Solapur points to Solapur city center
         const dLat = (rawLat - firstLat) * 0.008;
         const dLng = (rawLng - firstLng) * 0.008;
         rawLat = SOLAPUR_LAT + Math.max(-0.04, Math.min(0.04, dLat)) + (idx % 5 - 2) * 0.0002;
