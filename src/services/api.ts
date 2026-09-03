@@ -2,7 +2,7 @@
 import { createMMKV } from 'react-native-mmkv';
 
 // Base URL — update this to your deployed backend
-const BASE_URL = (process.env.EXPO_PUBLIC_API_BASE_URL || 'https://cortex-swm-oneearth.vercel.app/api/v1');
+const BASE_URL = (process.env.EXPO_PUBLIC_API_BASE_URL || 'https://oneearth-one.vercel.app/api/v1');
 // For local dev: set EXPO_PUBLIC_API_BASE_URL=http://192.168.x.x:3000/api/v1 in .env
 
 const storage = createMMKV({ id: 'auth-store' });

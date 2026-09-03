@@ -18,8 +18,8 @@
       },
       "env": {
         "EXPO_PUBLIC_GOOGLE_MAPS_KEY": "AIzaSyDPTspFcq0ZZ_Nbjg7HkSQ1toulXqW2XdQ",
-        "EXPO_PUBLIC_WS_BASE_URL": "wss://cortex-swm-oneearth.vercel.app",
-        "EXPO_PUBLIC_API_BASE_URL": "https://cortex-swm-oneearth.vercel.app/api/v1"
+        "EXPO_PUBLIC_WS_BASE_URL": "https://oneearth-one.vercel.app",
+        "EXPO_PUBLIC_API_BASE_URL": "https://oneearth-one.vercel.app/api/v1"
       }
     },
     "production": {
@@ -28,8 +28,8 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://cortex-swm-oneearth.vercel.app/api/v1",
-        "EXPO_PUBLIC_WS_BASE_URL": "https://cortex-swm-oneearth.vercel.app",
+        "EXPO_PUBLIC_API_BASE_URL": "https://oneearth-one.vercel.app/api/v1",
+        "EXPO_PUBLIC_WS_BASE_URL": "https://oneearth-one.vercel.app",
         "EXPO_PUBLIC_GOOGLE_MAPS_KEY": "AIzaSyDPTspFcq0ZZ_Nbjg7HkSQ1toulXqW2XdQ"
       }
     }
