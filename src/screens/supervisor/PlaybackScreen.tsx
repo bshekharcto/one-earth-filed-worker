@@ -97,42 +97,38 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
     }
   };
 
-  const runPlaybackLoop = useCallback((timestamp: number) => {
-    if (!track || track.points.length < 2) return;
+  const runPlaybackLoop = useCallback((nowTime: number) => {
+    if (!track || !track.points || track.points.length < 2) return;
+
     const points = track.points;
-    const totalTrackMs = new Date(points[points.length - 1].timestamp).getTime()
-                        - new Date(points[0].timestamp).getTime();
+    const elapsedSec = (nowTime - lastFrameTimeRef.current) / 1000;
+    lastFrameTimeRef.current = nowTime;
 
-    const realElapsedMs = timestamp - playbackStartRealTimeRef.current;
-    const trackElapsedMs = playbackStartTrackTimeRef.current + realElapsedMs * speedMultiplier;
-    const progress = Math.min(1, Math.max(0, trackElapsedMs / totalTrackMs));
+    setPlaybackProgress(prev => {
+      const step = (elapsedSec * speedMultiplier * 0.15);
+      const nextProgress = Math.min(1, prev + step);
 
-    setPlaybackProgress(progress);
+      const pointIdx = Math.min(points.length - 1, Math.floor(nextProgress * (points.length - 1)));
+      setCurrentPointIndex(pointIdx);
 
-    const targetTimeMs = new Date(points[0].timestamp).getTime() + trackElapsedMs;
-    let idx = 0;
-    for (let i = 0; i < points.length - 1; i++) {
-      if (new Date(points[i].timestamp).getTime() <= targetTimeMs) idx = i;
-    }
-    setCurrentPointIndex(idx);
+      const cur = points[pointIdx];
+      if (cur) {
+        (markerAnim as any).timing({
+          latitude: cur.lat,
+          longitude: cur.lng,
+          duration: 300,
+          useNativeDriver: false
+        }).start();
+      }
 
-    const p1 = points[idx];
-    const p2 = points[Math.min(idx + 1, points.length - 1)];
+      if (nextProgress >= 1) {
+        setIsPlaying(false);
+        return 1;
+      }
+      return nextProgress;
+    });
 
-    if (p1 && p2 && p1 !== p2) {
-      const t1 = new Date(p1.timestamp).getTime();
-      const t2 = new Date(p2.timestamp).getTime();
-      const segmentFraction = t2 > t1 ? (targetTimeMs - t1) / (t2 - t1) : 0;
-      const interpolated = lerpPosition(p1, p2, Math.min(1, Math.max(0, segmentFraction)));
-
-      markerAnim.setValue({ latitude: interpolated.lat, longitude: interpolated.lng, latitudeDelta: 0, longitudeDelta: 0 });
-    }
-
-    if (progress < 1) {
-      animFrameRef.current = requestAnimationFrame(runPlaybackLoop);
-    } else {
-      setIsPlaying(false);
-    }
+    animFrameRef.current = requestAnimationFrame(runPlaybackLoop);
   }, [track, speedMultiplier]);
 
   useEffect(() => {
