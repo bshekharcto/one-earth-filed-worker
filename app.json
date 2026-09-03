@@ -44,6 +44,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      "./plugins/withOldArchitecture",
       [
         "expo-splash-screen",
         {
