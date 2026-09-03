@@ -21,7 +21,7 @@
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
     "react-native": "0.86.3",
-    "react-native-gesture-handler": "~2.32.0",
+    "react-native-gesture-handler": "^3.2.1",
     "react-native-maps": "^1.27.2",
     "react-native-mmkv": "^4.3.2",
     "react-native-nitro-modules": "^0.37.1",
@@ -45,5 +45,17 @@
     "build:dev": "npx eas-cli build --platform android --profile development",
     "build:prod": "npx eas-cli build --platform android --profile production"
   },
-  "private": true
+  "private": true,
+  "expo": {
+    "install": {
+      "exclude": [
+        "react-native-gesture-handler",
+        "react-native-maps",
+        "react-native-reanimated",
+        "react-native-safe-area-context",
+        "react-native-screens",
+        "@react-native-community/slider"
+      ]
+    }
+  }
 }

@@ -1,40 +1,43 @@
-﻿{
-  "cli": {
-    "version": ">= 12.0.0",
-    "appVersionSource": "remote"
-  },
-  "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal",
-      "android": {
-        "buildType": "apk"
-      }
-    },
-    "preview": {
-      "distribution": "internal",
-      "android": {
-        "buildType": "apk"
-      },
-      "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://cortex-swm-oneearth.vercel.app/api/v1",
-        "EXPO_PUBLIC_WS_BASE_URL": "https://cortex-swm-oneearth.vercel.app",
-        "EXPO_PUBLIC_GOOGLE_MAPS_KEY": "AIzaSyDPTspFcq0ZZ_Nbjg7HkSQ1toulXqW2XdQ"
-      }
-    },
-    "production": {
-      "autoIncrement": true,
-      "android": {
-        "buildType": "app-bundle"
-      },
-      "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://cortex-swm-oneearth.vercel.app/api/v1",
-        "EXPO_PUBLIC_WS_BASE_URL": "https://cortex-swm-oneearth.vercel.app",
-        "EXPO_PUBLIC_GOOGLE_MAPS_KEY": "AIzaSyDPTspFcq0ZZ_Nbjg7HkSQ1toulXqW2XdQ"
-      }
-    }
-  },
-  "submit": {
-    "production": {}
-  }
+{
+    "cli":  {
+                "version":  "\u003e= 12.0.0",
+                "appVersionSource":  "remote"
+            },
+    "build":  {
+                  "development":  {
+                                      "developmentClient":  true,
+                                      "distribution":  "internal",
+                                      "android":  {
+                                                      "buildType":  "apk"
+                                                  }
+                                  },
+                  "preview":  {
+                                  "distribution":  "internal",
+                                  "android":  {
+                                                  "buildType":  "apk"
+                                              },
+                                  "env":  {
+                                              "EXPO_UNSTABLE_DISABLE_NEW_ARCH_ON_ANDROID":  "1",
+                                              "EXPO_PUBLIC_GOOGLE_MAPS_KEY":  "AIzaSyDPTspFcq0ZZ_Nbjg7HkSQ1toulXqW2XdQ",
+                                              "EXPO_PUBLIC_WS_BASE_URL":  "wss://cortex-swm-oneearth.vercel.app",
+                                              "EXPO_PUBLIC_API_BASE_URL":  "https://cortex-swm-oneearth.vercel.app/api/v1"
+                                          }
+                              },
+                  "production":  {
+                                     "autoIncrement":  true,
+                                     "android":  {
+                                                     "buildType":  "app-bundle"
+                                                 },
+                                     "env":  {
+                                                 "EXPO_PUBLIC_API_BASE_URL":  "https://cortex-swm-oneearth.vercel.app/api/v1",
+                                                 "EXPO_PUBLIC_WS_BASE_URL":  "https://cortex-swm-oneearth.vercel.app",
+                                                 "EXPO_PUBLIC_GOOGLE_MAPS_KEY":  "AIzaSyDPTspFcq0ZZ_Nbjg7HkSQ1toulXqW2XdQ"
+                                             }
+                                 }
+              },
+    "submit":  {
+                   "production":  {
+
+                                  }
+               }
 }
