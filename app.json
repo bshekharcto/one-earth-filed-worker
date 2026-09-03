@@ -1,80 +1,82 @@
-{
-  "expo": {
-    "name": "Cortex Field Ops",
-    "slug": "cortex-field-ops",
-    "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "dark",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0A0E1A"
-    },
-    "ios": {
-      "supportsTablet": false,
-      "bundleIdentifier": "com.solapur.cortex.fieldops",
-      "infoPlist": {
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Cortex Field Ops tracks your location during your shift for attendance and GPS trail recording.",
-        "NSLocationWhenInUseUsageDescription": "Cortex Field Ops needs location access for GPS attendance tracking.",
-        "NSCameraUsageDescription": "Camera is used to scan QR codes and take D2D verification photos.",
-        "GMSApiKey": "AIzaSyDPTspFcq0ZZ_Nbjg7HkSQ1toulXqW2XdQ"
-      }
-    },
-    "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0A0E1A"
-      },
-      "package": "com.solapur.cortex.fieldops",
-      "versionCode": 1,
-      "permissions": [
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION",
-        "CAMERA",
-        "VIBRATE",
-        "RECEIVE_BOOT_COMPLETED",
-        "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_LOCATION",
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_BACKGROUND_LOCATION",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_LOCATION",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
-      ],
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyDPTspFcq0ZZ_Nbjg7HkSQ1toulXqW2XdQ"
-        }
-      }
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    },
-    "plugins": [
-      [
-        "expo-location",
-        {
-          "locationAlwaysAndWhenInUsePermission": "Cortex Field Ops tracks your GPS during your shift.",
-          "isAndroidBackgroundLocationEnabled": true,
-          "isAndroidForegroundServiceEnabled": true
-        }
-      ],
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "Camera is needed to scan QR codes and take verification photos."
-        }
-      ]
-    ],
-    "extra": {
-      "googleMapsApiKey": "AIzaSyDPTspFcq0ZZ_Nbjg7HkSQ1toulXqW2XdQ",
-      "eas": {
-        "projectId": "55d36e58-06a4-4b5c-8e2d-041a698aeeda"
-      }
-    }
-  }
+﻿{
+    "expo":  {
+                 "name":  "Cortex Field Ops",
+                 "slug":  "cortex-field-ops",
+                 "version":  "1.0.0",
+                 "orientation":  "portrait",
+                 "icon":  "./assets/icon.png",
+                 "userInterfaceStyle":  "dark",
+                 "splash":  {
+                                "image":  "./assets/splash-icon.png",
+                                "resizeMode":  "contain",
+                                "backgroundColor":  "#0A0E1A"
+                            },
+                 "ios":  {
+                             "supportsTablet":  false,
+                             "bundleIdentifier":  "com.solapur.cortex.fieldops",
+                             "infoPlist":  {
+                                               "NSLocationAlwaysAndWhenInUseUsageDescription":  "Cortex Field Ops tracks your location during your shift for attendance and GPS trail recording.",
+                                               "NSLocationWhenInUseUsageDescription":  "Cortex Field Ops needs location access for GPS attendance tracking.",
+                                               "NSCameraUsageDescription":  "Camera is used to scan QR codes and take D2D verification photos.",
+                                               "GMSApiKey":  "AIzaSyDPTspFcq0ZZ_Nbjg7HkSQ1toulXqW2XdQ"
+                                           }
+                         },
+                 "android":  {
+                                 "adaptiveIcon":  {
+                                                      "backgroundColor":  "#0A0E1A",
+                                                      "foregroundImage":  "./assets/android-icon-foreground.png",
+                                                      "backgroundImage":  "./assets/android-icon-background.png",
+                                                      "monochromeImage":  "./assets/android-icon-monochrome.png"
+                                                  },
+                                 "package":  "com.solapur.cortex.fieldops",
+                                 "versionCode":  1,
+                                 "permissions":  [
+                                                     "ACCESS_COARSE_LOCATION",
+                                                     "ACCESS_FINE_LOCATION",
+                                                     "ACCESS_BACKGROUND_LOCATION",
+                                                     "CAMERA",
+                                                     "VIBRATE",
+                                                     "RECEIVE_BOOT_COMPLETED",
+                                                     "FOREGROUND_SERVICE",
+                                                     "FOREGROUND_SERVICE_LOCATION",
+                                                     "android.permission.ACCESS_COARSE_LOCATION",
+                                                     "android.permission.ACCESS_FINE_LOCATION",
+                                                     "android.permission.ACCESS_BACKGROUND_LOCATION",
+                                                     "android.permission.FOREGROUND_SERVICE",
+                                                     "android.permission.FOREGROUND_SERVICE_LOCATION",
+                                                     "android.permission.CAMERA",
+                                                     "android.permission.RECORD_AUDIO"
+                                                 ],
+                                 "config":  {
+                                                "googleMaps":  {
+                                                                   "apiKey":  "AIzaSyDPTspFcq0ZZ_Nbjg7HkSQ1toulXqW2XdQ"
+                                                               }
+                                            }
+                             },
+                 "web":  {
+                             "favicon":  "./assets/favicon.png"
+                         },
+                 "plugins":  [
+                                 [
+                                     "expo-location",
+                                     {
+                                         "locationAlwaysAndWhenInUsePermission":  "Cortex Field Ops tracks your GPS during your shift.",
+                                         "isAndroidBackgroundLocationEnabled":  true,
+                                         "isAndroidForegroundServiceEnabled":  true
+                                     }
+                                 ],
+                                 [
+                                     "expo-camera",
+                                     {
+                                         "cameraPermission":  "Camera is needed to scan QR codes and take verification photos."
+                                     }
+                                 ]
+                             ],
+                 "extra":  {
+                               "googleMapsApiKey":  "AIzaSyDPTspFcq0ZZ_Nbjg7HkSQ1toulXqW2XdQ",
+                               "eas":  {
+                                           "projectId":  "55d36e58-06a4-4b5c-8e2d-041a698aeeda"
+                                       }
+                           }
+             }
 }
