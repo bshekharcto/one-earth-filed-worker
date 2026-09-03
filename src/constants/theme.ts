@@ -1,37 +1,37 @@
-﻿// Cortex Field Ops — Design System Tokens
+﻿// Cortex Field Ops - Light Mode Design System Tokens
 
 export const Colors = {
-  bg: '#0A0E1A',
-  bgCard: '#111827',
-  bgSunken: '#080C17',
-  bgPanel: '#161D2F',
-  primary: '#3B82F6',
+  bg: '#F8FAFC',
+  bgCard: '#FFFFFF',
+  bgSunken: '#F1F5F9',
+  bgPanel: '#FFFFFF',
+  primary: '#2563EB',
   primaryDark: '#1D4ED8',
-  primaryLight: '#60A5FA',
+  primaryLight: '#3B82F6',
   success: '#10B981',
   warning: '#F59E0B',
   danger: '#EF4444',
   info: '#6366F1',
   punchIn: '#10B981',
   punchOut: '#EF4444',
-  textPrimary: '#F1F5F9',
-  textSecondary: '#94A3B8',
-  textDisabled: '#475569',
-  textInverse: '#0A0E1A',
-  border: '#1E2A40',
-  divider: '#1A2235',
+  textPrimary: '#0F172A',
+  textSecondary: '#475569',
+  textDisabled: '#94A3B8',
+  textInverse: '#FFFFFF',
+  border: '#E2E8F0',
+  divider: '#E2E8F0',
   markerWorker: '#10B981',
-  markerVehicle: '#3B82F6',
-  markerOffline: '#475569',
+  markerVehicle: '#2563EB',
+  markerOffline: '#94A3B8',
   markerD2DPending: '#F59E0B',
   markerD2DCollected: '#10B981',
   markerD2DMissed: '#EF4444',
   trackSlow: '#10B981',
   trackMedium: '#F59E0B',
-  trackFast: '#3B82F6',
-  trackStationary: '#475569',
-  glass: 'rgba(17, 24, 39, 0.85)',
-  glassBorder: 'rgba(255, 255, 255, 0.08)',
+  trackFast: '#2563EB',
+  trackStationary: '#94A3B8',
+  glass: 'rgba(255, 255, 255, 0.92)',
+  glassBorder: 'rgba(0, 0, 0, 0.08)',
 };
 
 export const Typography = {
@@ -51,21 +51,13 @@ export const Radius = {
 };
 
 export const Shadow = {
-  sm: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.3, shadowRadius: 3, elevation: 2 },
-  md: { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 6 },
-  lg: { shadowColor: '#3B82F6', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.25, shadowRadius: 16, elevation: 12 },
-  glow: { shadowColor: '#10B981', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 12, elevation: 8 },
+  sm: { shadowColor: '#64748B', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3, elevation: 2 },
+  md: { shadowColor: '#64748B', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 8, elevation: 4 },
+  lg: { shadowColor: '#2563EB', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 16, elevation: 8 },
+  glow: { shadowColor: '#10B981', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.4, shadowRadius: 12, elevation: 6 },
 };
 
 export const SOLAPUR_CENTER = { lat: 17.6599, lng: 75.9064 };
 
-export const MapStyle = [
-  { elementType: 'geometry', stylers: [{ color: '#0d1117' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#0d1117' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#746855' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1a2035' }] },
-  { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#9ca5b3' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#1e3a5f' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0d1f2d' }] },
-  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#0a1a0a' }] },
-];
+// Clean Light Map Style
+export const MapStyle: any[] = [];

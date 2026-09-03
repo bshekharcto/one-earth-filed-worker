@@ -65,7 +65,7 @@ export const LoginScreen: React.FC<Props> = ({ onLoginSuccess }) => {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <StatusBar barStyle="light-content" backgroundColor={Colors.bg} />
+      <StatusBar barStyle="dark-content" backgroundColor={Colors.bg} />
 
       {/* Language Toggle */}
       <TouchableOpacity style={styles.langToggle} onPress={toggleLang}>
