@@ -8,10 +8,11 @@
 import * as Location from 'expo-location';
 import { emitWorkerPosition } from './socket';
 import { enqueueGPS } from './offlineQueue';
-import { createMMKV } from 'react-native-mmkv';
+import { sendTelemetryHeartbeat } from './api';
+import { storage } from './storage';
 import NetInfo from '@react-native-community/netinfo';
 
-const storage = createMMKV({ id: 'gps-state' });
+// Storage via SecureStore
 let watchSubscription: Location.LocationSubscription | null = null;
 let staffId = '';
 let lastPosition: { lat: number; lng: number } | null = null;
@@ -111,8 +112,10 @@ const handleNewLocation = async (loc: Location.LocationObject) => {
 
   // Try socket first (no network overhead), fall back to queue
   const net = await NetInfo.fetch();
-  if (net.isConnected && emitWorkerPosition(point)) {
-    return; // sent via WebSocket
+  if (net.isConnected) {
+    emitWorkerPosition(point);
+    sendTelemetryHeartbeat(staffId, [point]).catch(() => {});
+    return;
   }
 
   // Offline: queue for later sync

@@ -44,3 +44,7 @@ yarn-error.*
 .env
 .env.local
 
+
+*.apk
+*.png
+*.tmp

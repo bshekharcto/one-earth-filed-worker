@@ -2,11 +2,11 @@
  * Offline Queue Service — MMKV-backed, batch-sync with retry
  * Handles GPS points, D2D events, and Punch actions when device is offline
  */
-import { createMMKV } from 'react-native-mmkv';
+import { storage } from './storage';
 import { sendHeartbeat, punchAttendance, d2dScan } from './api';
 import NetInfo from '@react-native-community/netinfo';
 
-const storage = createMMKV({ id: 'offline-queue' });
+// Storage via SecureStore
 
 const GPS_KEY = 'gps_queue';
 const D2D_KEY = 'd2d_queue';

@@ -1,10 +1,8 @@
 ﻿/**
- * Auth Store — MMKV-backed, survives app restarts
+ * Auth Store — SecureStore + Fast Cache backed
  */
-import { createMMKV } from 'react-native-mmkv';
+import { storage } from '../services/storage';
 import { AuthUser, Lang } from '../types';
-
-const storage = createMMKV({ id: 'auth-store' });
 
 export const authStore = {
   getUser: (): AuthUser | null => {
@@ -49,4 +47,3 @@ export const authStore = {
     storage.remove('shift_start_time');
   },
 };
-

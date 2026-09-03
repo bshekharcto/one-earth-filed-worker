@@ -63,6 +63,9 @@ const stringsData = {
     // Errors
     noGPS: 'Unable to get GPS. Please check location permissions.',
     networkError: 'Network error. Data saved offline.',
+    logout: 'Logout',
+    logoutConfirm: 'Are you sure you want to log out?',
+    cancel: 'Cancel',
   },
   mr: {
     appName: 'कॉर्टेक्स फील्ड ऑप्स',
@@ -118,6 +121,9 @@ const stringsData = {
     duration: 'कालावधी',
     noGPS: 'GPS मिळत नाही. स्थान परवानगी तपासा.',
     networkError: 'नेटवर्क त्रुटी. डेटा ऑफलाइन जतन केला.',
+    logout: 'बाहेर पडा',
+    logoutConfirm: 'तुम्हाला खरोखर बाहेर पडायचे आहे का?',
+    cancel: 'रद्द करा',
   },
 };
 

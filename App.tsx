@@ -31,7 +31,7 @@ export default function App() {
         <StatusBar style="light" />
         {user ? (
           <NavigationContainer>
-            <AppNavigator user={user} />
+            <AppNavigator user={user} onLogout={() => { authStore.logout(); setUser(null); }} />
           </NavigationContainer>
         ) : (
           <LoginScreen onLoginSuccess={(u) => setUser(u)} />

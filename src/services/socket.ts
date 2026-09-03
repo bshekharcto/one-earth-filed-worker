@@ -1,8 +1,7 @@
 ﻿import { io, Socket } from 'socket.io-client';
-import { createMMKV } from 'react-native-mmkv';
+import { storage } from './storage';
 
-const BASE_URL = (process.env.EXPO_PUBLIC_WS_BASE_URL || 'https://cortex-swm-oneearth.vercel.app');
-const storage = createMMKV({ id: 'auth-store' });
+const BASE_URL = (process.env.EXPO_PUBLIC_WS_BASE_URL || 'https://oneearth-one.vercel.app');
 
 let socket: Socket | null = null;
 
@@ -11,10 +10,10 @@ export const getSocket = (): Socket => {
     const token = storage.getString('jwt_token') || '';
     socket = io(`${BASE_URL}/tracking`, {
       auth: { token },
-      transports: ['websocket'],
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 2000,
-      reconnectionDelayMax: 30000,
+      transports: ['polling', 'websocket'],
+      autoConnect: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 5000,
     });
 
     socket.on('connect', () => {
@@ -23,8 +22,8 @@ export const getSocket = (): Socket => {
     socket.on('disconnect', (reason) => {
       console.log('[Socket] Disconnected:', reason);
     });
-    socket.on('connect_error', (err) => {
-      console.warn('[Socket] Connection error:', err.message);
+    socket.on('connect_error', () => {
+      // Suppress noisy Vercel serverless websocket warning logs
     });
   }
   return socket;
@@ -71,7 +70,5 @@ export const emitWorkerPosition = (data: {
     s.emit('worker:heartbeat', data);
     return true;
   }
-  return false; // offline — caller should queue it
+  return false;
 };
-
-
