@@ -47,22 +47,26 @@ export interface WorkerPosition {
 export interface VehiclePosition {
   vehicleId: string;
   registrationNumber: string;
-  makeModel: string;
-  zoneId: string;
+  makeModel?: string;
+  zoneId?: string;
   lat: number;
   lng: number;
   speed: number;
   heading: number;
   timestamp: string;
   isOnline: boolean;
-  lastSeenMs: number;
+  lastSeenMs?: number;
+  vehicleType?: string;
+  isMoving?: boolean;
+  driverName?: string;
+  battery?: number;
 }
 
 export interface PlaybackPoint {
   lat: number;
   lng: number;
   speed: number;
-  heading: number;
+  heading?: number;
   timestamp: string;
   isInterpolated?: boolean;
 }
@@ -80,6 +84,8 @@ export interface PlaybackTrack {
   punchOutLng?: number;
   distanceKm?: number;
   durationMinutes?: number;
+  totalDistanceKm?: number;
+  totalDurationMin?: number;
   d2dEvents?: D2DEvent[];
 }
 
@@ -87,8 +93,8 @@ export interface D2DEvent {
   propertyId: string;
   ownerName: string;
   address: string;
-  locality: string;
-  propertyTaxNumber: string;
+  locality?: string;
+  propertyTaxNumber?: string;
   qrCode: string;
   lat: number;
   lng: number;
@@ -96,6 +102,7 @@ export interface D2DEvent {
   wasteCategory?: 'SEGREGATED' | 'MIXED' | 'NONE';
   collectionTimestamp?: string;
   photoProofUrl?: string;
+  wardId?: string;
 }
 
 export interface AttendanceRow {

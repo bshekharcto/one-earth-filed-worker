@@ -10,7 +10,7 @@ import { Colors, Typography, Spacing, Radius, Shadow, MapStyle, SOLAPUR_CENTER }
 import { authStore } from '../../stores/authStore';
 import { strings } from '../../i18n/strings';
 import { subscribeAllWorkers } from '../../services/socket';
-import { getLiveRoster } from '../../services/api';
+import { getLiveRoster, getWorkerTrail } from '../../services/api';
 import { extrapolate } from '../../components/map/DeadReckoningEngine';
 import { WorkerPosition } from '../../types';
 import { HeaderDrawer } from '../../components/common/HeaderDrawer';
@@ -19,10 +19,19 @@ const { width, height } = Dimensions.get('window');
 
 // Solapur geographical boundary check
 const sanitizeCoords = (lat: number, lng: number, index: number) => {
-  if (lat >= 17.2 && lat <= 18.1 && lng >= 75.2 && lng <= 76.4) {
-    return { lat, lng };
-  }
-  // Fallback test coordinates into Solapur city center offsets
+  // Only substitute when the fix is genuinely unusable. This previously
+  // replaced ANY coordinate outside a Solapur bounding box with a constant
+  // from the table below -- and the socket handler passes index 0, so every
+  // worker outside that box was pinned to 17.6610/75.9250 and never moved,
+  // which made live tracking look frozen when testing from anywhere else.
+  const valid =
+    Number.isFinite(lat) && Number.isFinite(lng) &&
+    Math.abs(lat) > 0.0001 && Math.abs(lng) > 0.0001 &&
+    Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+  if (valid) return { lat, lng };
+
+  // Seeded/demo rows with no real position get spread around Solapur so they
+  // do not all stack on null island.
   const offsets = [
     { lat: 17.6610, lng: 75.9250 },
     { lat: 17.6410, lng: 75.9030 },
@@ -45,12 +54,31 @@ export const LiveWorkersScreen: React.FC<{ onLogout?: () => void }> = ({ onLogou
   const mapRef = useRef<MapView>(null);
   const [workers, setWorkers] = useState<Map<string, WorkerPosition>>(new Map());
   const [selectedWorker, setSelectedWorker] = useState<WorkerPosition | null>(null);
+  // Live breadcrumb per worker, appended on every socket update. Capped so a
+  // long shift cannot grow the array without bound.
+  const trails = useRef<Map<string, { lat: number; lng: number }[]>>(new Map());
+  const MAX_TRAIL_POINTS = 2000;
+  // Earlier path for the selected worker, fetched from telemetry history so the
+  // line shows where they came from -- not just since this screen was opened.
+  const [historyTrail, setHistoryTrail] = useState<{ lat: number; lng: number }[]>([]);
+  const [trailVersion, setTrailVersion] = useState(0);
   const [followMode, setFollowMode] = useState(false);
   const [filterRole, setFilterRole] = useState('ALL');
   const markerAnimations = useRef<Map<string, AnimatedRegion>>(new Map());
   const extrapolationTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Load initial roster from Neon DB
+  // A worker counts as live while their last fix is inside this window.
+  // Matches the server's `isLive` in /field/live-roster so both agree.
+  const LIVE_WINDOW_MS = 3 * 60 * 1000;
+  // GPS only fires every 15s AND after 20m of movement, so a slow or
+  // stationary worker legitimately goes quiet for a while. Only treat them as
+  // "extrapolated" once they are well past that, and only if actually moving.
+  const STALE_MS = 90 * 1000;
+
+  const ageMs = (w: WorkerPosition) => Date.now() - new Date(w.timestamp).getTime();
+  const isLive = (w: WorkerPosition) => ageMs(w) < LIVE_WINDOW_MS;
+
   useEffect(() => {
     getLiveRoster().then((roster: any[]) => {
       const map = new Map<string, WorkerPosition>();
@@ -65,9 +93,13 @@ export const LiveWorkersScreen: React.FC<{ onLogout?: () => void }> = ({ onLogou
             staffId: s.id, name: s.name || 'Worker', employeeCode: s.employeeCode || 'SMC-001',
             role: s.role || 'SWEEPER', wardId: s.wardId || 'ward-01',
             lat, lng,
-            speed: 0, heading: 0, battery: s.batteryPercent || 85,
-            timestamp: new Date().toISOString(),
-            isOnline: s.status === 'ON_DUTY', lastSeenMs: 0,
+            speed: 0, heading: 0, battery: s.batteryPercent ?? -1,
+            // Was `new Date()` + `status === 'ON_DUTY'`: every worker looked
+            // freshly seen at load (green) and the staleness timer then flipped
+            // them orange 30s later, regardless of whether they had ever sent
+            // GPS. Use the server's real last_seen_at instead.
+            timestamp: s.lastSeenAt || new Date(0).toISOString(),
+            isOnline: !!s.isLive, lastSeenMs: 0,
           };
           map.set(s.id, pos);
           markerAnimations.current.set(s.id, new AnimatedRegion({
@@ -87,12 +119,27 @@ export const LiveWorkersScreen: React.FC<{ onLogout?: () => void }> = ({ onLogou
         const cleanPos = { ...pos, lat, lng, isOnline: true, lastSeenMs: 0 };
         updated.set(pos.staffId, cleanPos);
 
+        // Append to the movement trail. Skip points that have not actually
+        // moved so a stationary worker does not pile up duplicates.
+        const trail = trails.current.get(pos.staffId) || [];
+        const last = trail[trail.length - 1];
+        if (!last || Math.abs(last.lat - lat) > 1e-7 || Math.abs(last.lng - lng) > 1e-7) {
+          trail.push({ lat, lng });
+          if (trail.length > MAX_TRAIL_POINTS) trail.shift();
+          trails.current.set(pos.staffId, trail);
+          // Trails live in a ref (mutating it will not re-render), so bump a
+          // counter to redraw the polyline for the selected worker.
+          setTrailVersion(v => v + 1);
+        }
+
         let anim = markerAnimations.current.get(pos.staffId);
         if (!anim) {
           anim = new AnimatedRegion({ latitude: lat, longitude: lng, latitudeDelta: 0, longitudeDelta: 0 });
           markerAnimations.current.set(pos.staffId, anim);
         } else {
-          (anim as any).timing({ latitude: lat, longitude: lng, duration: 1500, useNativeDriver: false }).start();
+          // Match the ~2s GPS cadence so the marker glides continuously
+          // instead of finishing early and sitting still.
+          (anim as any).timing({ latitude: lat, longitude: lng, duration: 2000, useNativeDriver: false }).start();
 
         if (followMode && mapRef.current) {
           mapRef.current.animateCamera(
@@ -113,7 +160,7 @@ export const LiveWorkersScreen: React.FC<{ onLogout?: () => void }> = ({ onLogou
         const now = Date.now();
         updated.forEach((w, id) => {
           const elapsedSec = (now - new Date(w.timestamp).getTime()) / 1000;
-          if (w.isOnline && elapsedSec > 30) {
+          if (isLive(w) && elapsedSec > STALE_MS / 1000 && (w.speed || 0) > 1) {
             const extInput = {
               lat: w.lat, lng: w.lng,
               speedKmh: w.speed || 0, headingDeg: w.heading || 0,
@@ -159,11 +206,34 @@ export const LiveWorkersScreen: React.FC<{ onLogout?: () => void }> = ({ onLogou
       latitude: w.lat, longitude: w.lng,
       latitudeDelta: 0.004, longitudeDelta: 0.004,
     }, 700);
+
+    // Pull today's recorded path so the line shows where this worker came
+    // from, not merely what has arrived since this screen was opened.
+    setHistoryTrail([]);
+    getWorkerTrail(w.staffId)
+      .then(setHistoryTrail)
+      .catch(() => setHistoryTrail([]));
   };
 
+  // History (already walked) + live breadcrumb (since screen open), de-duped
+  // at the join so the two segments form one continuous line.
+  const selectedTrail = React.useMemo(() => {
+    if (!selectedWorker) return [];
+    const live = trails.current.get(selectedWorker.staffId) || [];
+    const merged = [...historyTrail, ...live];
+    const out: { lat: number; lng: number }[] = [];
+    for (const p of merged) {
+      const prev = out[out.length - 1];
+      if (!prev || Math.abs(prev.lat - p.lat) > 1e-7 || Math.abs(prev.lng - p.lng) > 1e-7) out.push(p);
+    }
+    return out;
+  }, [selectedWorker, historyTrail, trailVersion]);
+
   const markerColor = (w: WorkerPosition) => {
-    if (!w.isOnline) return Colors.markerOffline;
-    if (w.isExtrapolated) return Colors.warning;
+    if (!isLive(w)) return Colors.markerOffline;
+    // Amber only while dead-reckoning a MOVING worker; a stationary worker
+    // simply has nothing to send and should stay green.
+    if (w.isExtrapolated && ageMs(w) > STALE_MS && (w.speed || 0) > 1) return Colors.warning;
     return Colors.markerWorker;
   };
 
@@ -191,6 +261,28 @@ export const LiveWorkersScreen: React.FC<{ onLogout?: () => void }> = ({ onLogou
         showsCompass={false}
         showsScale={false}
       >
+        {/* Movement line for the tapped worker: where they have walked today.
+            Drawn before the markers so the pins stay on top of the line. */}
+        {selectedWorker && selectedTrail.length > 1 && (
+          <>
+            <Polyline
+              coordinates={selectedTrail.map(p => ({ latitude: p.lat, longitude: p.lng }))}
+              strokeColor={Colors.primary}
+              strokeWidth={5}
+              lineCap="round"
+              lineJoin="round"
+              geodesic
+            />
+            <Marker
+              coordinate={{ latitude: selectedTrail[0].lat, longitude: selectedTrail[0].lng }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              title="Shift start"
+            >
+              <View style={styles.trailStartDot} />
+            </Marker>
+          </>
+        )}
+
         {visibleWorkers.map(w => {
           const anim = markerAnimations.current.get(w.staffId);
           if (!anim) return null;
@@ -217,7 +309,7 @@ export const LiveWorkersScreen: React.FC<{ onLogout?: () => void }> = ({ onLogou
       <View style={styles.topBar}>
         <View style={styles.countBadge}>
           <Feather name="users" size={14} color={Colors.primary} style={{ marginRight: 6 }} />
-          <Text style={styles.countText}>{visibleWorkers.filter(w => w.isOnline).length} Live</Text>
+          <Text style={styles.countText}>{visibleWorkers.filter(w => isLive(w)).length} Live</Text>
         </View>
 
         <TouchableOpacity
@@ -258,9 +350,11 @@ export const LiveWorkersScreen: React.FC<{ onLogout?: () => void }> = ({ onLogou
           </View>
           <Text style={styles.workerPanelRole}>{selectedWorker.employeeCode} · {selectedWorker.role}</Text>
           <View style={styles.workerPanelStats}>
-            <Text style={styles.workerPanelStat}>🔋 {selectedWorker.battery}%</Text>
             <Text style={styles.workerPanelStat}>
-              {selectedWorker.isOnline ? '🟢 Live' : '🔴 Offline'}
+              🔋 {selectedWorker.battery >= 0 ? `${selectedWorker.battery}%` : '--'}
+            </Text>
+            <Text style={styles.workerPanelStat}>
+              {isLive(selectedWorker) ? '🟢 Live' : '🔴 Offline'}
             </Text>
           </View>
         </View>
@@ -271,6 +365,10 @@ export const LiveWorkersScreen: React.FC<{ onLogout?: () => void }> = ({ onLogou
 };
 
 const styles = StyleSheet.create({
+  trailStartDot: {
+    width: 14, height: 14, borderRadius: 7,
+    backgroundColor: Colors.success, borderWidth: 3, borderColor: '#fff',
+  },
   container: { flex: 1, backgroundColor: Colors.bg },
   map: { flex: 1 },
   topBar: {

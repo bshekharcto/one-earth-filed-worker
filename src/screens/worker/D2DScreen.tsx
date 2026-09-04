@@ -254,12 +254,15 @@ export const D2DScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => 
         </Modal>
       )}
 
-      {/* QR Camera Modal */}
-      <QRScanner
-        visible={showScanner}
-        onClose={() => setShowScanner(false)}
-        onScan={handleQRScanned}
-      />
+      {/* QR Camera Modal — QRScanner has no `visible` prop, so it must be
+          mounted conditionally. Rendering it unconditionally kept the camera
+          running the whole time this screen was open. */}
+      {showScanner && (
+        <QRScanner
+          onClose={() => setShowScanner(false)}
+          onScan={handleQRScanned}
+        />
+      )}
     </View>
   );
 };

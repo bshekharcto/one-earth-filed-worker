@@ -11,6 +11,7 @@ export const Colors = {
   success: '#10B981',
   warning: '#F59E0B',
   danger: '#EF4444',
+  error: '#EF4444',   // alias: screens reference Colors.error
   info: '#6366F1',
   punchIn: '#10B981',
   punchOut: '#EF4444',
@@ -38,7 +39,7 @@ export const Typography = {
   size: { xs: 11, sm: 13, md: 15, lg: 17, xl: 20, '2xl': 24, '3xl': 30, '4xl': 36 },
   weight: {
     regular: '400' as const, medium: '500' as const,
-    semibold: '600' as const, bold: '700' as const, extrabold: '800' as const,
+    semibold: '600' as const, bold: '700' as const, extrabold: '800' as const, black: '900' as const,
   },
 };
 
@@ -51,6 +52,7 @@ export const Radius = {
 };
 
 export const Shadow = {
+  xs: { shadowColor: '#64748B', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
   sm: { shadowColor: '#64748B', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.08, shadowRadius: 3, elevation: 2 },
   md: { shadowColor: '#64748B', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 8, elevation: 4 },
   lg: { shadowColor: '#2563EB', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 16, elevation: 8 },

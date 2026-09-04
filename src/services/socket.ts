@@ -1,7 +1,9 @@
 ﻿import { io, Socket } from 'socket.io-client';
 import { storage } from './storage';
 
-const BASE_URL = (process.env.EXPO_PUBLIC_WS_BASE_URL || 'https://oneearth-one.vercel.app');
+// Fallback must be a host that can actually hold a WebSocket. Vercel
+// serverless cannot, so a Vercel fallback silently never connects.
+const BASE_URL = (process.env.EXPO_PUBLIC_WS_BASE_URL || 'https://cortex-oneearth.onrender.com');
 
 let socket: Socket | null = null;
 
@@ -12,8 +14,11 @@ export const getSocket = (): Socket => {
       auth: { token },
       transports: ['polling', 'websocket'],
       autoConnect: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 5000,
+      // Field devices lose signal routinely. Giving up after 5 tries (~25s)
+      // left the socket dead for the rest of the session with no way back.
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 30000,
     });
 
     socket.on('connect', () => {
@@ -22,8 +27,10 @@ export const getSocket = (): Socket => {
     socket.on('disconnect', (reason) => {
       console.log('[Socket] Disconnected:', reason);
     });
-    socket.on('connect_error', () => {
-      // Suppress noisy Vercel serverless websocket warning logs
+    socket.on('connect_error', (err) => {
+      // Was silenced to hide Vercel's constant failures; now that a real
+      // socket server exists, an error here is a genuine signal worth seeing.
+      console.warn('[Socket] Connection error:', err.message);
     });
   }
   return socket;

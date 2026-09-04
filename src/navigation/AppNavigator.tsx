@@ -17,6 +17,12 @@ import { LiveWorkersScreen } from '../screens/supervisor/LiveWorkersScreen';
 import { LiveVehiclesScreen } from '../screens/supervisor/LiveVehiclesScreen';
 import { PlaybackScreen } from '../screens/supervisor/PlaybackScreen';
 
+// Temporarily hidden from the tab bar. Flip to true to bring them back --
+// the screens and their navigation entries are left intact so nothing else
+// needs to change.
+const SHOW_VEHICLES_TAB = true;
+const SHOW_D2D_TAB = false;
+
 const Tab = createBottomTabNavigator();
 
 interface Props {
@@ -70,6 +76,7 @@ export const AppNavigator: React.FC<Props> = ({ user, onLogout }) => {
             tabBarLabel: ({ focused }) => <TabLabel label={t.home} focused={focused} />,
           }}
         />
+        {SHOW_D2D_TAB && (
         <Tab.Screen
           name="D2D"
           children={() => <D2DScreen onLogout={onLogout} />}
@@ -81,6 +88,7 @@ export const AppNavigator: React.FC<Props> = ({ user, onLogout }) => {
             tabBarLabel: ({ focused }) => <TabLabel label={t.d2d} focused={focused} />,
           }}
         />
+        )}
       </Tab.Navigator>
     );
   }
@@ -99,6 +107,7 @@ export const AppNavigator: React.FC<Props> = ({ user, onLogout }) => {
           tabBarLabel: ({ focused }) => <TabLabel label={t.workers} focused={focused} />,
         }}
       />
+      {SHOW_VEHICLES_TAB && (
       <Tab.Screen
         name="Vehicles"
         children={() => <LiveVehiclesScreen onLogout={onLogout} />}
@@ -110,6 +119,7 @@ export const AppNavigator: React.FC<Props> = ({ user, onLogout }) => {
           tabBarLabel: ({ focused }) => <TabLabel label={t.vehicles} focused={focused} />,
         }}
       />
+      )}
       <Tab.Screen
         name="Playback"
         children={() => <PlaybackScreen onLogout={onLogout} />}
@@ -121,6 +131,7 @@ export const AppNavigator: React.FC<Props> = ({ user, onLogout }) => {
           tabBarLabel: ({ focused }) => <TabLabel label={t.playback} focused={focused} />,
         }}
       />
+      {SHOW_D2D_TAB && (
       <Tab.Screen
         name="D2D"
         children={() => <D2DScreen onLogout={onLogout} />}
@@ -132,6 +143,7 @@ export const AppNavigator: React.FC<Props> = ({ user, onLogout }) => {
           tabBarLabel: ({ focused }) => <TabLabel label={t.d2d} focused={focused} />,
         }}
       />
+      )}
     </Tab.Navigator>
   );
 };

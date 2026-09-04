@@ -14,6 +14,8 @@ import { getPlaybackTrack, getLiveRoster, getActiveVehicles } from '../../servic
 import { lerpPosition, computeBearing } from '../../components/map/DeadReckoningEngine';
 import { PlaybackTrack, PlaybackPoint } from '../../types';
 import { HeaderDrawer } from '../../components/common/HeaderDrawer';
+import { DateFilterBar, toDateKey } from '../../components/common/DateFilterBar';
+import { isPlaceholderVehicle } from './LiveVehiclesScreen';
 
 const { width, height } = Dimensions.get('window');
 const SPEEDS = [1, 2, 4, 8];
@@ -31,7 +33,7 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
 
   const [entityType, setEntityType] = useState<'worker' | 'vehicle'>('worker');
   const [selectedId, setSelectedId] = useState<string>('');
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(() => toDateKey(new Date()));
   const [track, setTrack] = useState<PlaybackTrack | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -51,14 +53,45 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
     if (entityType === 'worker') {
       getLiveRoster().then(setEntities).catch(() => {});
     } else {
-      getActiveVehicles().then(setEntities).catch(() => {});
+      // Same RESET-<imei> placeholders the live map hides -- they have no real
+      // route to play back, and 46 of them would bury the 47 real vehicles.
+      getActiveVehicles()
+        .then((list: any[]) => setEntities(
+          (Array.isArray(list) ? list : []).filter(v => !isPlaceholderVehicle(v.registrationNumber))
+        ))
+        .catch(() => {});
     }
     setSelectedId('');
     setTrack(null);
+    setError('');
   }, [entityType]);
 
-  const fetchTrack = async () => {
-    if (!selectedId) {
+  // A track belongs to one day. Changing the day must never leave the previous
+  // day's polyline on screen -- reload straight away when someone is selected.
+  const handleDateChange = (dateKey: string) => {
+    setSelectedDate(dateKey);
+    setTrack(null);
+    setIsPlaying(false);
+    setPlaybackProgress(0);
+    setCurrentPointIndex(0);
+    setError('');
+    if (selectedId) fetchTrack(selectedId, dateKey);
+  };
+
+  const handleSelectEntity = (id: string) => {
+    setSelectedId(id);
+    setTrack(null);
+    setIsPlaying(false);
+    setPlaybackProgress(0);
+    setCurrentPointIndex(0);
+    setError('');
+    fetchTrack(id, selectedDate);
+  };
+
+  const fetchTrack = async (idArg?: string, dateArg?: string) => {
+    const id = idArg ?? selectedId;
+    const date = dateArg ?? selectedDate;
+    if (!id) {
       setError('Please select a worker or vehicle');
       return;
     }
@@ -69,9 +102,9 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
     setCurrentPointIndex(0);
 
     try {
-      const data = await getPlaybackTrack(entityType, selectedId, selectedDate);
+      const data = await getPlaybackTrack(entityType, id, date);
       if (!data || data.points.length < 2) {
-        setError('No GPS track records found for selected date');
+        setError(`No GPS track recorded on ${date}`);
         setTrack(null);
       } else {
         setTrack(data);
@@ -181,6 +214,8 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
           <HeaderDrawer onLogout={onLogout} onLangChange={() => setLang(authStore.getLang())} />
         </View>
 
+        <DateFilterBar value={selectedDate} onChange={handleDateChange} />
+
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.entityList}>
           {entities.map((e: any) => {
             const id = e.id;
@@ -189,7 +224,7 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
               <TouchableOpacity
                 key={id}
                 style={[styles.entityChip, selectedId === id && styles.entityChipActive]}
-                onPress={() => setSelectedId(id)}
+                onPress={() => handleSelectEntity(id)}
               >
                 <Text style={[styles.entityChipText, selectedId === id && styles.entityChipTextActive]}>{label}</Text>
               </TouchableOpacity>
@@ -197,7 +232,7 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
           })}
         </ScrollView>
 
-        <TouchableOpacity style={styles.loadBtn} onPress={fetchTrack} disabled={isLoading}>
+        <TouchableOpacity style={styles.loadBtn} onPress={() => fetchTrack()} disabled={isLoading}>
           {isLoading ? (
             <ActivityIndicator color="#fff" size="small" />
           ) : (
@@ -237,8 +272,8 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
       {track && (
         <View style={styles.controlsCard}>
           <View style={styles.timeRow}>
-            <Text style={styles.timeText}>{t.duration}: {track.totalDurationMin} min</Text>
-            <Text style={styles.timeText}>{t.distance}: {track.totalDistanceKm.toFixed(2)} km</Text>
+            <Text style={styles.timeText}>{t.duration}: {track.totalDurationMin ?? 0} min</Text>
+            <Text style={styles.timeText}>{t.distance}: {(track.totalDistanceKm ?? 0).toFixed(2)} km</Text>
           </View>
 
           <Slider
@@ -301,8 +336,7 @@ const styles = StyleSheet.create({
   },
 
   controlsCard: {
-    bottom: Platform.OS === "android" ? 36 : 20,
-    position: 'absolute', bottom: 20, left: 16, right: 16,
+    position: 'absolute', bottom: Platform.OS === 'android' ? 36 : 20, left: 16, right: 16,
     backgroundColor: Colors.bgCard, borderRadius: Radius.xl, padding: Spacing.md,
     borderWidth: 1, borderColor: Colors.border, ...Shadow.lg,
   },

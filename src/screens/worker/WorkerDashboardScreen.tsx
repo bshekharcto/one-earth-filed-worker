@@ -13,6 +13,7 @@ import { strings } from '../../i18n/strings';
 import { punchAttendance } from '../../services/api';
 import { startTracking, stopTracking, getDistanceTodayKm, getLastPosition } from '../../services/gpsTracker';
 import { enqueuePunch, getGPSQueueCount, runSync } from '../../services/offlineQueue';
+import * as Battery from 'expo-battery';
 import { HeaderDrawer } from '../../components/common/HeaderDrawer';
 
 export const WorkerDashboardScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
@@ -27,7 +28,9 @@ export const WorkerDashboardScreen: React.FC<{ onLogout?: () => void }> = ({ onL
   const [queueCount, setQueueCount] = useState(0);
   const [distanceKm, setDistanceKm] = useState(0);
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
-  const [battery, setBattery] = useState(85);
+  // Was a static 85 that nothing ever updated, so both this dashboard and the
+  // attendance punch payload reported a fixed value regardless of the device.
+  const [battery, setBattery] = useState(100);
   const [lastLocation, setLastLocation] = useState<string>('Acquiring...');
   const [isSyncing, setIsSyncing] = useState(false);
   const [punchLoading, setPunchLoading] = useState(false);
@@ -35,6 +38,17 @@ export const WorkerDashboardScreen: React.FC<{ onLogout?: () => void }> = ({ onL
   const syncRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Shift timer
+  useEffect(() => {
+    let sub: { remove: () => void } | null = null;
+    Battery.getBatteryLevelAsync()
+      .then(l => { if (l >= 0) setBattery(Math.round(l * 100)); })
+      .catch(() => {});
+    sub = Battery.addBatteryLevelListener(({ batteryLevel }) => {
+      if (batteryLevel >= 0) setBattery(Math.round(batteryLevel * 100));
+    });
+    return () => sub?.remove();
+  }, []);
+
   useEffect(() => {
     if (isShiftActive) {
       const startTime = authStore.getShiftStartTime();
@@ -107,7 +121,16 @@ export const WorkerDashboardScreen: React.FC<{ onLogout?: () => void }> = ({ onL
       } else {
         enqueuePunch({ ...punchPayload, timestamp: new Date().toISOString() });
       }
-      await startTracking(user.id);
+      // startTracking() returns false when location permission was refused.
+      // Ignoring it marked the shift active and showed a success alert while
+      // no GPS watcher was running, so tracking failed completely but silently.
+      const trackingStarted = await startTracking(user.id);
+      if (!trackingStarted) {
+        Alert.alert(
+          'GPS permission needed',
+          'Location access is required to track your shift. Enable it in Settings > Apps > Permissions > Location.'
+        );
+      }
       authStore.setShiftActive(true);
       setIsShiftActive(true);
       Vibration.vibrate([0, 100, 50, 100]);

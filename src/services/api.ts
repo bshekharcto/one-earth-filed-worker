@@ -84,6 +84,24 @@ export const getActiveVehicles = async () => {
   return res.data;
 };
 
+
+// --- Worker trail (for the live map's movement line) ---
+// Raw points only: no road-snapping, so the line shows exactly where the
+// worker actually walked rather than the nearest drivable road.
+export const getWorkerTrail = async (staffId: string, date?: string) => {
+  // Local date, not toISOString() -- that is UTC, so between 00:00 and 05:30
+  // IST the live map would ask for yesterday's trail.
+  const now = new Date();
+  const day = date || `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}`;
+  const res = await api.get('/telemetry/history', {
+    params: { staffId, startDate: day, endDate: day },
+  });
+  const rows: any[] = Array.isArray(res.data) ? res.data : [];
+  return rows
+    .map(p => ({ lat: Number(p.lat), lng: Number(p.lng) }))
+    .filter(p => !isNaN(p.lat) && !isNaN(p.lng) && p.lat !== 0 && p.lng !== 0);
+};
+
 // --- Playback ---
 import { snapTrackToRoads } from './roadsApi';
 
@@ -93,13 +111,29 @@ export const getPlaybackTrack = async (
   date: string
 ) => {
   try {
-    const params = type === 'vehicle' ? { vehicleId: id } : { staffId: id };
+    // `date` used to be accepted and then never sent, so playback ignored the
+    // date picker entirely and returned whatever the server had on hand.
+    const params: Record<string, string> = type === 'vehicle'
+      ? { vehicleId: id }
+      : { staffId: id };
+    if (date) {
+      // Send explicit instants, not a bare YYYY-MM-DD. The server expands a
+      // bare date using UTC midnight, so in IST (+05:30) a "day" would run
+      // 05:30 -> 05:30 and a morning shift would land on the wrong date.
+      // Local day bounds keep the picker honest wherever the supervisor is.
+      const [y, m, d] = date.split('-').map(Number);
+      params.startDate = new Date(y, m - 1, d, 0, 0, 0, 0).toISOString();
+      params.endDate = new Date(y, m - 1, d, 23, 59, 59, 999).toISOString();
+    }
     const res = await api.get('/telemetry/history', { params });
-    let rawList: any[] = res.data;
+    const rawList: any[] = res.data;
 
+    // No synthetic fallback. This used to fabricate a Solapur track whenever
+    // real data was missing, so an empty day looked identical to a working
+    // one and playback could never be trusted. PlaybackScreen already shows
+    // "No GPS track records found for selected date" for a short track.
     if (!Array.isArray(rawList) || rawList.length < 2) {
-      // Generate realistic Solapur track fallback
-      rawList = generateSolapurTrack(id);
+      return { entityId: id, entityType: type, date, points: [], totalDistanceKm: 0, totalDurationMin: 0 };
     }
 
     const trackPoints = rawList.map((p, idx) => ({
@@ -130,41 +164,13 @@ export const getPlaybackTrack = async (
       totalDurationMin: Math.round(snapped.length * 1.5) || 45,
     };
   } catch (err) {
-    const fallbackPoints = await snapTrackToRoads(generateSolapurTrack(id));
-    return {
-      entityId: id,
-      entityType: type,
-      date,
-      points: fallbackPoints,
-      totalDistanceKm: 6.2,
-      totalDurationMin: 50,
-    };
+    // Surface the failure instead of returning an invented track.
+    console.warn('[Playback] track fetch failed:', err);
+    return { entityId: id, entityType: type, date, points: [], totalDistanceKm: 0, totalDurationMin: 0 };
   }
 };
 
-function generateSolapurTrack(id: string) {
-  const baseLat = 17.6599;
-  const baseLng = 75.9064;
-  const waypoints = [
-    { lat: 17.6599, lng: 75.9064 },
-    { lat: 17.6620, lng: 75.9100 },
-    { lat: 17.6650, lng: 75.9140 },
-    { lat: 17.6680, lng: 75.9180 },
-    { lat: 17.6710, lng: 75.9220 },
-    { lat: 17.6690, lng: 75.9260 },
-    { lat: 17.6640, lng: 75.9240 },
-    { lat: 17.6600, lng: 75.9190 },
-    { lat: 17.6570, lng: 75.9120 },
-    { lat: 17.6599, lng: 75.9064 },
-  ];
-  return waypoints.map((w, idx) => ({
-    lat: w.lat,
-    lng: w.lng,
-    speed: 15 + (idx % 3) * 8,
-    heading: 45,
-    timestamp: new Date(Date.now() - (10 - idx) * 300000).toISOString(),
-  }));
-}
+
 
 export default api;
 

@@ -6,14 +6,45 @@
  * - MMKV queue when offline
  */
 import * as Location from 'expo-location';
+import * as Battery from 'expo-battery';
 import { emitWorkerPosition } from './socket';
 import { enqueueGPS } from './offlineQueue';
-import { sendTelemetryHeartbeat } from './api';
+import { sendHeartbeat } from './api';
 import { storage } from './storage';
 import NetInfo from '@react-native-community/netinfo';
 
 // Storage via SecureStore
 let watchSubscription: Location.LocationSubscription | null = null;
+let backgroundActive = false;
+
+// Battery was hardcoded to 85 with a "expo-battery not in deps yet" note, so
+// supervisors saw a constant for every worker. Read it for real, but cache it:
+// getBatteryLevelAsync() on every GPS fix would be a native call every 2s.
+let batteryPercent = 100;
+let batterySub: { remove: () => void } | null = null;
+let lastBatteryPoll = 0;
+
+const refreshBattery = async () => {
+  try {
+    const lvl = await Battery.getBatteryLevelAsync();   // 0..1, -1 if unknown
+    if (lvl >= 0) batteryPercent = Math.round(lvl * 100);
+  } catch { /* keep last known value */ }
+};
+
+const startBatteryWatch = async () => {
+  await refreshBattery();
+  if (batterySub) return;
+  // Android reports in ~1% steps, so this fires rarely and is cheap.
+  batterySub = Battery.addBatteryLevelListener(({ batteryLevel }) => {
+    if (batteryLevel >= 0) batteryPercent = Math.round(batteryLevel * 100);
+  });
+};
+
+const stopBatteryWatch = () => {
+  batterySub?.remove();
+  batterySub = null;
+};
+export const LOCATION_TASK = 'background-location-task';
 let staffId = '';
 let lastPosition: { lat: number; lng: number } | null = null;
 
@@ -29,42 +60,83 @@ const haversineMeters = (lat1: number, lng1: number, lat2: number, lng2: number)
 export const requestPermissions = async (): Promise<boolean> => {
   const { status: fg } = await Location.requestForegroundPermissionsAsync();
   if (fg !== 'granted') return false;
+
+  // Background permission is requested but NOT required. On Android 11+ the
+  // in-app dialog cannot grant "Allow all the time" at all -- the user has to
+  // set it in system Settings. Treating that as total failure meant
+  // startTracking() bailed and no GPS was ever recorded, even in foreground.
+  // watchPositionAsync() only needs foreground permission, so proceed on fg.
   const { status: bg } = await Location.requestBackgroundPermissionsAsync();
-  return bg === 'granted';
+  if (bg !== 'granted') {
+    console.warn('[GPS] Background location denied - foreground tracking only');
+  }
+  return true;
 };
 
 export const startTracking = async (sid: string): Promise<boolean> => {
   staffId = sid;
+  // The OS can spin up the background task in a fresh JS context where module
+  // state is empty, so the id has to be readable from storage there.
+  storage.set('tracking_staff_id', sid);
 
   const hasPermission = await requestPermissions();
   if (!hasPermission) return false;
 
-  // Start foreground service notification
-  await Location.startLocationUpdatesAsync('background-location-task', {
-    accuracy: Location.Accuracy.Balanced,
-    timeInterval: 15000,       // minimum 15 seconds
-    distanceInterval: 20,      // or every 20 meters moved
-    deferredUpdatesInterval: 60000,
-    deferredUpdatesDistance: 50,
-    showsBackgroundLocationIndicator: true,
-    foregroundService: {
-      notificationTitle: 'Cortex Field Ops',
-      notificationBody: 'GPS tracking active — shift in progress',
-      notificationColor: '#10B981',
-    },
-  }).catch(() => {
-    // Fallback: foreground-only tracking (no bare workflow native module yet)
-    console.warn('[GPS] Background task failed, using foreground watch');
-  });
+  await startBatteryWatch();
 
-  // Also start foreground watcher for immediate UI updates
+  // Background updates need the "Allow all the time" grant. Attempting them
+  // without it just throws, so check first and say so plainly.
+  const { status: bgStatus } = await Location.getBackgroundPermissionsAsync();
+  backgroundActive = false;
+
+  if (bgStatus === 'granted') {
+    try {
+      const already = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK);
+      if (already) await Location.stopLocationUpdatesAsync(LOCATION_TASK);
+      await startBackgroundUpdates();
+      backgroundActive = true;
+      console.log('[GPS] Background tracking active - continues when app is closed');
+    } catch (e: any) {
+      console.warn('[GPS] Background updates failed, foreground only:', e?.message);
+    }
+  } else {
+    console.warn('[GPS] No background permission - tracking stops when app is backgrounded');
+  }
+
+  // Foreground watcher. When the background task is running it already
+  // delivers fixes, so this would double every point; handleNewLocation
+  // de-dupes on timestamp to keep the trail clean either way.
   watchSubscription = await Location.watchPositionAsync(
-    { accuracy: Location.Accuracy.Balanced, timeInterval: 15000, distanceInterval: 20 },
+    { accuracy: Location.Accuracy.High, timeInterval: 2000, distanceInterval: 1 },
     (loc) => handleNewLocation(loc)
   );
 
   return true;
 };
+
+export const isBackgroundTrackingActive = () => backgroundActive;
+
+const startBackgroundUpdates = () =>
+  Location.startLocationUpdatesAsync(LOCATION_TASK, {
+    // Balanced/20m only produced a fix every 20 metres, so a walking worker
+    // jumped between sparse points and looked frozen in between. High accuracy
+    // at 1m/2s gives a continuous trail fine enough to see someone stepping.
+    accuracy: Location.Accuracy.High,
+    timeInterval: 2000,        // at most every 2 seconds
+    distanceInterval: 1,       // or every 1 metre moved
+    deferredUpdatesInterval: 5000,
+    deferredUpdatesDistance: 5,
+    showsBackgroundLocationIndicator: true,
+    // Keeps the process alive and is mandatory on Android 10+ for
+    // background location; the user sees a persistent shift notification.
+    foregroundService: {
+      notificationTitle: 'Cortex Field Ops',
+      notificationBody: 'GPS tracking active - shift in progress',
+      notificationColor: '#10B981',
+    },
+    pausesUpdatesAutomatically: false,
+    activityType: Location.ActivityType.Fitness,
+  });
 
 export const stopTracking = async () => {
   if (watchSubscription) {
@@ -72,13 +144,29 @@ export const stopTracking = async () => {
     watchSubscription = null;
   }
   try {
-    await Location.stopLocationUpdatesAsync('background-location-task');
+    if (await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK)) {
+      await Location.stopLocationUpdatesAsync(LOCATION_TASK);
+    }
+    backgroundActive = false;
   } catch {}
+  stopBatteryWatch();
+  await flushPendingTelemetry();
+  storage.remove('tracking_staff_id');
   staffId = '';
   lastPosition = null;
 };
 
-const handleNewLocation = async (loc: Location.LocationObject) => {
+export const setStaffId = (sid: string) => { staffId = sid; };
+
+let lastProcessedTs = 0;
+
+export const handleNewLocation = async (loc: Location.LocationObject) => {
+  // The foreground watcher and the background task can both deliver the same
+  // fix while the app is open, which would double every trail point and every
+  // heartbeat. Ignore anything not newer than the last one processed.
+  if (loc.timestamp && loc.timestamp <= lastProcessedTs) return;
+  lastProcessedTs = loc.timestamp || Date.now();
+
   const { latitude: lat, longitude: lng, speed, heading, accuracy } = loc.coords;
 
   // Calculate distance moved for adaptive logic
@@ -91,7 +179,14 @@ const handleNewLocation = async (loc: Location.LocationObject) => {
   }
   lastPosition = { lat, lng };
 
-  const battery = 85; // expo-battery not in deps yet — placeholder
+  // In the background task the OS may have started a fresh JS context where
+  // startBatteryWatch() never ran, so there is no listener keeping this
+  // current. Refresh on a slow timer in that case rather than every fix.
+  if (!batterySub && Date.now() - lastBatteryPoll > 60000) {
+    lastBatteryPoll = Date.now();
+    await refreshBattery();
+  }
+  const battery = batteryPercent;
   const point = {
     staffId,
     lat, lng,
@@ -110,16 +205,51 @@ const handleNewLocation = async (loc: Location.LocationObject) => {
     timestamp: point.timestamp,
   }));
 
-  // Try socket first (no network overhead), fall back to queue
+  // Socket goes out on EVERY fix -- it is an in-memory fanout, so it is cheap
+  // and it is what makes the supervisor map move smoothly.
   const net = await NetInfo.fetch();
   if (net.isConnected) {
     emitWorkerPosition(point);
-    sendTelemetryHeartbeat(staffId, [point]).catch(() => {});
+    // The REST heartbeat is a database write. At a 2s cadence that would be
+    // ~30 writes/min per worker, so buffer the points and flush them as one
+    // batch instead -- /field/telemetry/heartbeat already accepts an array.
+    restBuffer.push(point);
+    flushRestBuffer();
     return;
   }
 
   // Offline: queue for later sync
   enqueueGPS(point);
+};
+
+// --- batched persistence -----------------------------------------------
+const REST_FLUSH_MS = 15000;
+let restBuffer: any[] = [];
+let lastRestFlush = 0;
+
+const flushRestBuffer = () => {
+  const now = Date.now();
+  if (now - lastRestFlush < REST_FLUSH_MS || !restBuffer.length) return;
+  lastRestFlush = now;
+  const batch = restBuffer;
+  restBuffer = [];
+  sendHeartbeat(staffId, batch).catch(() => {
+    // Nothing is lost on failure: fall back to the offline queue, which
+    // runSync() retries on its own schedule.
+    batch.forEach(p => enqueueGPS(p));
+  });
+};
+
+// Flush whatever is buffered when the shift ends, so the tail of the
+// trail is not dropped.
+export const flushPendingTelemetry = () => {
+  if (!restBuffer.length) return;
+  const batch = restBuffer;
+  restBuffer = [];
+  lastRestFlush = Date.now();
+  return sendHeartbeat(staffId, batch).catch(() => {
+    batch.forEach(p => enqueueGPS(p));
+  });
 };
 
 export const getLastPosition = () => {

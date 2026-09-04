@@ -17,15 +17,21 @@ import { HeaderDrawer } from '../../components/common/HeaderDrawer';
 
 const { width, height } = Dimensions.get('window');
 
-// Solapur geographical boundary check
-const sanitizeVehicleCoords = (lat: number, lng: number, index: number) => {
-  if (lat >= 17.2 && lat <= 18.1 && lng >= 75.2 && lng <= 76.4) {
-    return { lat, lng };
-  }
-  const baseLat = 17.6599 + ((index * 13) % 40 - 20) * 0.003;
-  const baseLng = 75.9064 + ((index * 17) % 40 - 20) * 0.003;
-  return { lat: baseLat, lng: baseLng };
-};
+// Solapur geographical boundary check.
+//
+// This used to RELOCATE an out-of-area vehicle onto an invented grid around
+// Solapur centre rather than reject it. The fleet DB holds ~46 auto-provisioned
+// RESET-<id> placeholders (one per unrecognised IMEI) reporting from Kashmir,
+// Sikkim and Ladakh, so the map filled up with vehicles at coordinates nobody
+// ever reported. A position we cannot trust is dropped, not moved.
+const inSolapur = (lat: number, lng: number) =>
+  Number.isFinite(lat) && Number.isFinite(lng) &&
+  lat >= 17.2 && lat <= 18.1 && lng >= 75.2 && lng <= 76.4;
+
+// Placeholder vehicles created by resolveVehicle() for unknown IMEIs. They are
+// not real fleet, so they are not shown.
+export const isPlaceholderVehicle = (registrationNumber?: string) =>
+  String(registrationNumber || '').startsWith('RESET-');
 
 export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
   const insets = useSafeAreaInsets();
@@ -44,11 +50,11 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
       if (!Array.isArray(list)) return;
       const map = new Map<string, VehiclePosition>();
 
-      list.forEach((v, idx) => {
-        if (v.currentLat && v.currentLng) {
-          const rawLat = Number(v.currentLat);
-          const rawLng = Number(v.currentLng);
-          const { lat, lng } = sanitizeVehicleCoords(rawLat, rawLng, idx);
+      list.forEach((v) => {
+        if (v.currentLat && v.currentLng && !isPlaceholderVehicle(v.registrationNumber)) {
+          const lat = Number(v.currentLat);
+          const lng = Number(v.currentLng);
+          if (!inSolapur(lat, lng)) return;
           const spd = Number(v.speed) || 0;
 
           const pos: VehiclePosition = {
@@ -71,9 +77,13 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
     }).catch(() => {});
 
     const unsub = subscribeAllVehicles((pos: VehiclePosition) => {
+      const lat = Number(pos.lat);
+      const lng = Number(pos.lng);
+      // Ignore the update outright rather than pinning the marker somewhere
+      // it never was -- a stale marker is honest, a moved one is not.
+      if (!inSolapur(lat, lng) || isPlaceholderVehicle(pos.registrationNumber)) return;
       setVehicles(prev => {
         const updated = new Map(prev);
-        const { lat, lng } = sanitizeVehicleCoords(pos.lat, pos.lng, 0);
         const cleanPos = { ...pos, lat, lng };
         updated.set(pos.vehicleId, cleanPos);
 

@@ -9,6 +9,7 @@ import { LoginScreen } from './src/screens/auth/LoginScreen';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { AuthUser } from './src/types';
 import { Colors } from './src/constants/theme';
+import { PermissionGate } from './src/components/common/PermissionGate';
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -30,9 +31,17 @@ export default function App() {
       <SafeAreaProvider>
         <StatusBar style="light" />
         {user ? (
-          <NavigationContainer>
-            <AppNavigator user={user} onLogout={() => { authStore.logout(); setUser(null); }} />
-          </NavigationContainer>
+          // Gated after login so the requirement can match the role: a worker
+          // is tracked and must grant "Allow all the time", a supervisor only
+          // needs foreground location for the map.
+          <PermissionGate
+            requireBackground={user.role === 'WORKER'}
+            onLogout={() => { authStore.logout(); setUser(null); }}
+          >
+            <NavigationContainer>
+              <AppNavigator user={user} onLogout={() => { authStore.logout(); setUser(null); }} />
+            </NavigationContainer>
+          </PermissionGate>
         ) : (
           <LoginScreen onLoginSuccess={(u) => setUser(u)} />
         )}
