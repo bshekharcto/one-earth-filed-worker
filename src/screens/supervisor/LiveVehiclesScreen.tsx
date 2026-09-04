@@ -10,7 +10,7 @@ import { Colors, Typography, Spacing, Radius, Shadow, MapStyle, SOLAPUR_CENTER }
 import { authStore } from '../../stores/authStore';
 import { strings } from '../../i18n/strings';
 import { subscribeAllVehicles } from '../../services/socket';
-import { getActiveVehicles } from '../../services/api';
+import { getActiveVehicles, getVehicleTrail } from '../../services/api';
 import { extrapolate, computeBearing } from '../../components/map/DeadReckoningEngine';
 import { VehiclePosition } from '../../types';
 import { HeaderDrawer } from '../../components/common/HeaderDrawer';
@@ -44,6 +44,12 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
   const [followMode, setFollowMode] = useState(false);
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'MOVING' | 'IDLE' | 'OFFLINE'>('ALL');
   const markerAnimations = useRef<Map<string, AnimatedRegion>>(new Map());
+  // Breadcrumb accumulated from socket events since the screen opened, plus
+  // today's recorded path fetched on tap. Kept in a ref so appending a point
+  // does not re-render every marker; trailVersion nudges the memo instead.
+  const trails = useRef<Map<string, { lat: number; lng: number }[]>>(new Map());
+  const [historyTrail, setHistoryTrail] = useState<{ lat: number; lng: number }[]>([]);
+  const [trailVersion, setTrailVersion] = useState(0);
 
   useEffect(() => {
     getActiveVehicles().then((list: any[]) => {
@@ -87,6 +93,17 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
         const cleanPos = { ...pos, lat, lng };
         updated.set(pos.vehicleId, cleanPos);
 
+        // Append to this vehicle's breadcrumb, skipping sub-metre repeats so a
+        // parked vehicle does not pile up thousands of identical points.
+        const trail = trails.current.get(pos.vehicleId) || [];
+        const last = trail[trail.length - 1];
+        if (!last || Math.abs(last.lat - lat) > 1e-5 || Math.abs(last.lng - lng) > 1e-5) {
+          trail.push({ lat, lng });
+          if (trail.length > 500) trail.shift();
+          trails.current.set(pos.vehicleId, trail);
+          setTrailVersion(v => v + 1);
+        }
+
         let anim = markerAnimations.current.get(pos.vehicleId);
         if (!anim) {
           anim = new AnimatedRegion({ latitude: lat, longitude: lng, latitudeDelta: 0, longitudeDelta: 0 });
@@ -108,8 +125,18 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
     return () => { unsub(); };
   }, []);
 
+  // A vehicle counts as live only if a fix arrived recently. isOnline came
+  // from the DB's status string, so a tracker that stopped transmitting days
+  // ago still showed as MOVING -- green for a vehicle nobody was hearing from.
+  const LIVE_WINDOW_MS = 3 * 60 * 1000;
+  const ageMs = (v: VehiclePosition) => Date.now() - new Date(v.timestamp).getTime();
+  const isLive = (v: VehiclePosition) => {
+    const a = ageMs(v);
+    return Number.isFinite(a) && a >= 0 && a < LIVE_WINDOW_MS;
+  };
+
   const getVehicleStatus = (v: VehiclePosition): 'MOVING' | 'IDLE' | 'OFFLINE' => {
-    if (!v.isOnline) return 'OFFLINE';
+    if (!isLive(v)) return 'OFFLINE';
     if (v.speed > 2) return 'MOVING';
     return 'IDLE';
   };
@@ -120,7 +147,27 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
       latitude: v.lat, longitude: v.lng,
       latitudeDelta: 0.005, longitudeDelta: 0.005,
     }, 700);
+
+    // Pull today's recorded path so the line shows where the vehicle came
+    // from, not merely what has arrived since this screen was opened.
+    setHistoryTrail([]);
+    getVehicleTrail(v.vehicleId)
+      .then(setHistoryTrail)
+      .catch(() => setHistoryTrail([]));
   };
+
+  // History (already driven) + live breadcrumb, de-duped at the join so the
+  // two segments form one continuous line.
+  const selectedTrail = React.useMemo(() => {
+    if (!selectedVehicle) return [];
+    const live = trails.current.get(selectedVehicle.vehicleId) || [];
+    const out: { lat: number; lng: number }[] = [];
+    for (const p of [...historyTrail, ...live]) {
+      const prev = out[out.length - 1];
+      if (!prev || Math.abs(prev.lat - p.lat) > 1e-7 || Math.abs(prev.lng - p.lng) > 1e-7) out.push(p);
+    }
+    return out;
+  }, [selectedVehicle, historyTrail, trailVersion]);
 
   const visibleVehicles = Array.from(vehicles.values()).filter(v => {
     if (filterStatus === 'ALL') return true;
@@ -129,9 +176,11 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
 
   const getStatusBadgeColor = (status: 'MOVING' | 'IDLE' | 'OFFLINE') => {
     switch (status) {
-      case 'MOVING': return Colors.primary;
+      // Green means "this vehicle is sending data right now" -- matching the
+      // worker map, where green is liveness rather than motion.
+      case 'MOVING': return Colors.success;
       case 'IDLE': return Colors.warning;
-      case 'OFFLINE': return Colors.textDisabled;
+      case 'OFFLINE': return Colors.markerOffline;
     }
   };
 
@@ -150,6 +199,27 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
         showsUserLocation={false}
         showsCompass={false}
       >
+        {/* Route of the tapped vehicle: where it has driven today. */}
+        {selectedVehicle && selectedTrail.length > 1 && (
+          <>
+            <Polyline
+              coordinates={selectedTrail.map(p => ({ latitude: p.lat, longitude: p.lng }))}
+              strokeColor={Colors.primary}
+              strokeWidth={5}
+              lineCap="round"
+              lineJoin="round"
+              geodesic
+            />
+            <Marker
+              coordinate={{ latitude: selectedTrail[0].lat, longitude: selectedTrail[0].lng }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              title="Start of today"
+            >
+              <View style={styles.trailStartDot} />
+            </Marker>
+          </>
+        )}
+
         {visibleVehicles.map(v => {
           const anim = markerAnimations.current.get(v.vehicleId);
           if (!anim) return null;
@@ -228,6 +298,10 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full, ...Shadow.sm, borderWidth: 1, borderColor: Colors.border,
   },
   countText: { fontSize: 12, fontWeight: Typography.weight.bold, color: Colors.textPrimary },
+  trailStartDot: {
+    width: 14, height: 14, borderRadius: 7,
+    backgroundColor: Colors.success, borderWidth: 3, borderColor: '#fff',
+  },
   followBtn: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: Colors.bgCard, paddingHorizontal: 14, paddingVertical: 8,

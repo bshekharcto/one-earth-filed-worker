@@ -102,6 +102,31 @@ export const getWorkerTrail = async (staffId: string, date?: string) => {
     .filter(p => !isNaN(p.lat) && !isNaN(p.lng) && p.lat !== 0 && p.lng !== 0);
 };
 
+// --- Vehicle trail (for the live map's movement line) ---
+// Raw points, no road-snapping: the line shows the positions the tracker
+// actually reported. Snapping happens in playback, where the extra Google
+// calls are worth it; on the live map they would cost a request every refresh.
+export const getVehicleTrail = async (vehicleId: string, date?: string) => {
+  const now = new Date();
+  const day = date || `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}`;
+  const [y, m, d] = day.split('-').map(Number);
+  const res = await api.get('/telemetry/history', {
+    params: {
+      vehicleId,
+      startDate: new Date(y, m - 1, d, 0, 0, 0, 0).toISOString(),
+      endDate: new Date(y, m - 1, d, 23, 59, 59, 999).toISOString(),
+      limit: 500,
+    },
+  });
+  const rows: any[] = Array.isArray(res.data) ? res.data : [];
+  return rows
+    .map(p => ({ lat: Number(p.lat), lng: Number(p.lng) }))
+    // The fleet gateway defaults unregistered IMEIs onto real vehicles, so a
+    // trail can contain points from a device 1400km away. Keep Solapur only.
+    .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng)
+              && p.lat >= 17.2 && p.lat <= 18.1 && p.lng >= 75.2 && p.lng <= 76.4);
+};
+
 // --- Playback ---
 import { snapTrackToRoads } from './roadsApi';
 
