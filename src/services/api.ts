@@ -111,11 +111,20 @@ export const getPlaybackTrack = async (
   date: string
 ) => {
   try {
+    // Only one physical tracker is fitted (IMEI 864022089453483), and the
+    // fleet table records it as veh-01. Supervisors can reach it under the
+    // A-01-DEMO label or the bare IMEI, so both resolve to the same row.
+    const VEHICLE_ALIASES: Record<string, string> = {
+      'A-01-DEMO': 'veh-01',
+      '864022089453483': 'veh-01',
+    };
+    const targetId = type === 'vehicle' ? (VEHICLE_ALIASES[id] || id) : id;
+
     // `date` used to be accepted and then never sent, so playback ignored the
     // date picker entirely and returned whatever the server had on hand.
     const params: Record<string, string> = type === 'vehicle'
-      ? { vehicleId: id }
-      : { staffId: id };
+      ? { vehicleId: targetId }
+      : { staffId: targetId };
     if (date) {
       // Send explicit instants, not a bare YYYY-MM-DD. The server expands a
       // bare date using UTC midnight, so in IST (+05:30) a "day" would run
@@ -125,43 +134,80 @@ export const getPlaybackTrack = async (
       params.startDate = new Date(y, m - 1, d, 0, 0, 0, 0).toISOString();
       params.endDate = new Date(y, m - 1, d, 23, 59, 59, 999).toISOString();
     }
+
     const res = await api.get('/telemetry/history', { params });
-    const rawList: any[] = res.data;
+    let rawList: any[] = res.data;
 
     // No synthetic fallback. This used to fabricate a Solapur track whenever
     // real data was missing, so an empty day looked identical to a working
     // one and playback could never be trusted. PlaybackScreen already shows
-    // "No GPS track records found for selected date" for a short track.
+    // "No GPS track recorded on <date>" for a short track.
     if (!Array.isArray(rawList) || rawList.length < 2) {
       return { entityId: id, entityType: type, date, points: [], totalDistanceKm: 0, totalDurationMin: 0 };
     }
 
-    const trackPoints = rawList.map((p, idx) => ({
+    // Oldest first. GPS fixes arrive in bursts and can land out of order, and
+    // the playback loop walks timestamps forward -- one row out of sequence
+    // makes the marker jump backwards mid-run.
+    rawList.sort((a, b) =>
+      new Date(a.timestamp || a.receivedAt).getTime() - new Date(b.timestamp || b.receivedAt).getTime());
+
+    // Cap the point count before road-snapping. snapTrackToRoads issues one
+    // Google request per 90 points, sequentially, so an unthinned day would
+    // be ~23 chained calls -- slow, and billed per call. Sampling evenly
+    // keeps the shape of the whole route rather than clipping the tail.
+    const MAX_PLAYBACK_POINTS = 300;
+    if (rawList.length > MAX_PLAYBACK_POINTS) {
+      const step = Math.ceil(rawList.length / MAX_PLAYBACK_POINTS);
+      const last = rawList[rawList.length - 1];
+      const sampled = rawList.filter((_, idx) => idx % step === 0);
+      // `idx % step` lands on the final point only when the length divides
+      // evenly, so the tail of the route was being clipped and the duration
+      // came up short. Keep the true last fix.
+      if (sampled[sampled.length - 1] !== last) sampled.push(last);
+      rawList = sampled;
+    }
+
+    // Coordinates are passed through as recorded. An earlier revision rebased
+    // out-of-area points onto Solapur centre, which drew a route the vehicle
+    // never drove; roadsApi already drops points outside the region.
+    const trackPoints = rawList.map((p) => ({
       lat: Number(p.lat),
       lng: Number(p.lng),
-      speed: Number(p.speed) || (idx % 2 === 0 ? 18 : 32),
-      heading: Number(p.heading) || 45,
-      timestamp: p.timestamp || new Date(Date.now() - (100 - idx) * 60000).toISOString(),
-    }));
+      speed: Number(p.speed) || 0,
+      heading: Number(p.heading) || 0,
+      timestamp: p.timestamp || p.receivedAt,
+    })).filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng) && !!p.timestamp);
+
+    if (trackPoints.length < 2) {
+      return { entityId: id, entityType: type, date, points: [], totalDistanceKm: 0, totalDurationMin: 0 };
+    }
 
     // Snap points to Google Roads API
     const snapped = await snapTrackToRoads(trackPoints);
 
-    // Calculate total distance & duration
+    // Calculate total distance
     let distKm = 0;
     for (let i = 1; i < snapped.length; i++) {
-      const dLat = (snapped[i].lat - snapped[i-1].lat) * 111.32;
-      const dLng = (snapped[i].lng - snapped[i-1].lng) * 111.32 * Math.cos(snapped[i].lat * Math.PI / 180);
+      const dLat = (snapped[i].lat - snapped[i - 1].lat) * 111.32;
+      const dLng = (snapped[i].lng - snapped[i - 1].lng) * 111.32 * Math.cos(snapped[i].lat * Math.PI / 180);
       distKm += Math.sqrt(dLat * dLat + dLng * dLng);
     }
+
+    // Duration comes from the timestamps, not the point count. Deriving it
+    // from length reported the same figure for a 20-minute round and an
+    // 8-hour shift whenever the sampling rate differed.
+    const firstMs = new Date(trackPoints[0].timestamp).getTime();
+    const lastMs = new Date(trackPoints[trackPoints.length - 1].timestamp).getTime();
+    const durationMin = lastMs > firstMs ? Math.round((lastMs - firstMs) / 60000) : 0;
 
     return {
       entityId: id,
       entityType: type,
       date,
       points: snapped,
-      totalDistanceKm: Number(distKm.toFixed(2)) || 5.4,
-      totalDurationMin: Math.round(snapped.length * 1.5) || 45,
+      totalDistanceKm: Number(distKm.toFixed(2)),
+      totalDurationMin: durationMin,
     };
   } catch (err) {
     // Surface the failure instead of returning an invented track.
@@ -169,7 +215,6 @@ export const getPlaybackTrack = async (
     return { entityId: id, entityType: type, date, points: [], totalDistanceKm: 0, totalDurationMin: 0 };
   }
 };
-
 
 
 export default api;

@@ -45,6 +45,7 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
   const [entities, setEntities] = useState<any[]>([]);
 
   const animFrameRef = useRef<number>(0);
+  const playbackProgressRef = useRef<number>(0);
   const lastFrameTimeRef = useRef<number>(0);
   const playbackStartRealTimeRef = useRef<number>(0);
   const playbackStartTrackTimeRef = useRef<number>(0);
@@ -73,6 +74,7 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
     setTrack(null);
     setIsPlaying(false);
     setPlaybackProgress(0);
+    playbackProgressRef.current = 0;
     setCurrentPointIndex(0);
     setError('');
     if (selectedId) fetchTrack(selectedId, dateKey);
@@ -83,6 +85,7 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
     setTrack(null);
     setIsPlaying(false);
     setPlaybackProgress(0);
+    playbackProgressRef.current = 0;
     setCurrentPointIndex(0);
     setError('');
     fetchTrack(id, selectedDate);
@@ -99,6 +102,7 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
     setError('');
     setIsPlaying(false);
     setPlaybackProgress(0);
+    playbackProgressRef.current = 0;
     setCurrentPointIndex(0);
 
     try {
@@ -130,36 +134,64 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
     }
   };
 
-  const runPlaybackLoop = useCallback((timestamp: number) => {
-    if (!track || track.points.length < 2) return;
+  const runPlaybackLoop = useCallback((nowTime: number) => {
+    if (!track || !track.points || track.points.length < 2) return;
     const points = track.points;
-    const totalTrackMs = new Date(points[points.length - 1].timestamp).getTime()
-                        - new Date(points[0].timestamp).getTime();
 
-    const realElapsedMs = timestamp - playbackStartRealTimeRef.current;
-    const trackElapsedMs = playbackStartTrackTimeRef.current + realElapsedMs * speedMultiplier;
-    const progress = Math.min(1, Math.max(0, trackElapsedMs / totalTrackMs));
+    const startMs = new Date(points[0].timestamp).getTime();
+    const endMs = new Date(points[points.length - 1].timestamp).getTime();
+    const totalTrackMs = endMs - startMs;
 
+    // A track whose timestamps are all equal (or unparseable) has no duration
+    // to play against, and dividing by it yields NaN -- the marker then never
+    // moves and the bar never fills. Fall back to a fixed-rate sweep so
+    // playback still shows the route.
+    const timeDriven = Number.isFinite(totalTrackMs) && totalTrackMs > 0;
+
+    let progress: number;
+    if (timeDriven) {
+      const realElapsedMs = nowTime - playbackStartRealTimeRef.current;
+      const trackElapsedMs = playbackStartTrackTimeRef.current + realElapsedMs * speedMultiplier;
+      progress = Math.min(1, Math.max(0, trackElapsedMs / totalTrackMs));
+    } else {
+      const elapsedSec = (nowTime - lastFrameTimeRef.current) / 1000;
+      progress = Math.min(1, playbackProgressRef.current + elapsedSec * speedMultiplier * 0.15);
+    }
+    lastFrameTimeRef.current = nowTime;
+    playbackProgressRef.current = progress;
     setPlaybackProgress(progress);
 
-    const targetTimeMs = new Date(points[0].timestamp).getTime() + trackElapsedMs;
+    // Locate the segment the playhead is inside. Time-driven playback dwells
+    // where the subject actually dwelled; indexing by point number instead
+    // would give a parked vehicle the same screen time as a moving one.
     let idx = 0;
-    for (let i = 0; i < points.length - 1; i++) {
-      if (new Date(points[i].timestamp).getTime() <= targetTimeMs) idx = i;
+    if (timeDriven) {
+      const targetTimeMs = startMs + progress * totalTrackMs;
+      for (let i = 0; i < points.length - 1; i++) {
+        if (new Date(points[i].timestamp).getTime() <= targetTimeMs) idx = i;
+      }
+      const p1 = points[idx];
+      const p2 = points[Math.min(idx + 1, points.length - 1)];
+      if (p1 && p2 && p1 !== p2) {
+        const t1 = new Date(p1.timestamp).getTime();
+        const t2 = new Date(p2.timestamp).getTime();
+        const frac = t2 > t1 ? (targetTimeMs - t1) / (t2 - t1) : 0;
+        // Interpolating every frame is already continuous, so the marker is
+        // set directly. Easing toward each point on top of this would only
+        // add lag behind the true position.
+        const interp = lerpPosition(p1, p2, Math.min(1, Math.max(0, frac)));
+        markerAnim.setValue({ latitude: interp.lat, longitude: interp.lng, latitudeDelta: 0, longitudeDelta: 0 });
+      }
+    } else {
+      idx = Math.min(points.length - 1, Math.floor(progress * (points.length - 1)));
+      const cur = points[idx];
+      if (cur) {
+        (markerAnim as any).timing({
+          latitude: cur.lat, longitude: cur.lng, duration: 300, useNativeDriver: false,
+        }).start();
+      }
     }
     setCurrentPointIndex(idx);
-
-    const p1 = points[idx];
-    const p2 = points[Math.min(idx + 1, points.length - 1)];
-
-    if (p1 && p2 && p1 !== p2) {
-      const t1 = new Date(p1.timestamp).getTime();
-      const t2 = new Date(p2.timestamp).getTime();
-      const segmentFraction = t2 > t1 ? (targetTimeMs - t1) / (t2 - t1) : 0;
-      const interpolated = lerpPosition(p1, p2, Math.min(1, Math.max(0, segmentFraction)));
-
-      markerAnim.setValue({ latitude: interpolated.lat, longitude: interpolated.lng, latitudeDelta: 0, longitudeDelta: 0 });
-    }
 
     if (progress < 1) {
       animFrameRef.current = requestAnimationFrame(runPlaybackLoop);
@@ -182,10 +214,16 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
   const togglePlay = () => {
     if (!track) return;
     if (!isPlaying) {
+      // Pressing play on a finished track restarts it rather than sitting at
+      // the end and immediately stopping again.
+      if (playbackProgressRef.current >= 1) {
+        playbackProgressRef.current = 0;
+        setPlaybackProgress(0);
+      }
       const points = track.points;
       const totalDurationMs = new Date(points[points.length - 1].timestamp).getTime()
                             - new Date(points[0].timestamp).getTime();
-      playbackStartTrackTimeRef.current = playbackProgress * totalDurationMs;
+      playbackStartTrackTimeRef.current = playbackProgressRef.current * totalDurationMs;
       playbackStartRealTimeRef.current = performance.now();
     }
     setIsPlaying(p => !p);
