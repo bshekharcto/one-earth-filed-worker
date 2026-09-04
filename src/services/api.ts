@@ -183,8 +183,15 @@ export const getPlaybackTrack = async (
       return { entityId: id, entityType: type, date, points: [], totalDistanceKm: 0, totalDurationMin: 0 };
     }
 
-    // Snap points to Google Roads API
-    const snapped = await snapTrackToRoads(trackPoints);
+    // Snap vehicles to the road network; leave workers exactly where they were.
+    //
+    // Google's snapToRoads moves a point onto the nearest DRIVABLE road. That
+    // is right for a compactor, and wrong for a sweeper: someone working a
+    // footpath, a back lane or inside a property gets dragged onto the nearest
+    // carriageway, drawing a route they never walked. The live map's trail
+    // already shows raw points, so snapping worker playback also made the two
+    // views disagree about the same walk.
+    const snapped = type === 'vehicle' ? await snapTrackToRoads(trackPoints) : trackPoints;
 
     // Calculate total distance
     let distKm = 0;

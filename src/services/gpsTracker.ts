@@ -154,11 +154,41 @@ export const stopTracking = async () => {
   storage.remove('tracking_staff_id');
   staffId = '';
   lastPosition = null;
+  lastAcceptedAt = 0;
+  consecutiveRejects = 0;
 };
 
 export const setStaffId = (sid: string) => { staffId = sid; };
 
 let lastProcessedTs = 0;
+
+/**
+ * Quality gates for incoming fixes.
+ *
+ * Nothing rejected here is stored, sent, or drawn -- a bad fix is the main
+ * reason a trail wanders off the road and the reason distance_today_km used to
+ * drift upward while a worker stood still.
+ */
+// Worst horizontal error still worth keeping. Indoors and under heavy cloud a
+// phone routinely reports 30-60m; beyond ~50m the point can sit on a parallel
+// street, which is worse than having no point at all.
+const MAX_ACCURACY_M = 50;
+// No municipal vehicle, let alone someone on foot, does 150 km/h. Anything
+// faster is a GPS spike, not movement.
+const MAX_SPEED_KMH = 150;
+// Below this the implied speed is dominated by jitter rather than travel:
+// 3m of noise across 0.5s reads as 21 km/h and would trip nothing useful.
+const MIN_JUMP_M = 10;
+// After a signal gap the previous fix is too old to compare against -- someone
+// can legitimately be far away, so the jump gate is skipped.
+const MAX_JUMP_GAP_MS = 60000;
+// If the gate rejects this many in a row we are almost certainly anchored to a
+// stale position (device moved with GPS off). Re-anchor rather than reject
+// every fix for the rest of the shift.
+const MAX_CONSECUTIVE_REJECTS = 4;
+
+let lastAcceptedAt = 0;
+let consecutiveRejects = 0;
 
 export const handleNewLocation = async (loc: Location.LocationObject) => {
   // The foreground watcher and the background task can both deliver the same
@@ -168,6 +198,44 @@ export const handleNewLocation = async (loc: Location.LocationObject) => {
   lastProcessedTs = loc.timestamp || Date.now();
 
   const { latitude: lat, longitude: lng, speed, heading, accuracy } = loc.coords;
+
+  // --- Quality gates ---------------------------------------------------
+  // A rejected fix must not advance lastPosition, or the next one is measured
+  // from a point we already decided was wrong.
+  const reject = (why: string) => {
+    consecutiveRejects++;
+    if (consecutiveRejects <= MAX_CONSECUTIVE_REJECTS) {
+      console.log(`[GPS] dropped fix (${why}), ${consecutiveRejects} in a row`);
+      return true;
+    }
+    // Give up gating and re-anchor: staying locked to a stale position would
+    // silently end tracking for the rest of the shift.
+    console.warn(`[GPS] ${consecutiveRejects} consecutive rejects (${why}) - re-anchoring`);
+    consecutiveRejects = 0;
+    lastPosition = null;
+    return false;
+  };
+
+  // accuracy is null on some devices; unknown is not the same as bad, so it
+  // is allowed through rather than blocking tracking on those handsets.
+  if (typeof accuracy === 'number' && accuracy > MAX_ACCURACY_M) {
+    if (reject(`accuracy ${Math.round(accuracy)}m`)) return;
+  }
+
+  const nowTs = loc.timestamp || Date.now();
+  if (lastPosition && lastAcceptedAt) {
+    const gapMs = nowTs - lastAcceptedAt;
+    const jumpM = haversineMeters(lastPosition.lat, lastPosition.lng, lat, lng);
+    if (gapMs > 0 && gapMs <= MAX_JUMP_GAP_MS && jumpM >= MIN_JUMP_M) {
+      const impliedKmh = (jumpM / (gapMs / 1000)) * 3.6;
+      if (impliedKmh > MAX_SPEED_KMH) {
+        if (reject(`${Math.round(impliedKmh)} km/h jump over ${Math.round(jumpM)}m`)) return;
+      }
+    }
+  }
+  consecutiveRejects = 0;
+  lastAcceptedAt = nowTs;
+  // ---------------------------------------------------------------------
 
   // Calculate distance moved for adaptive logic
   if (lastPosition) {
