@@ -120,11 +120,15 @@ export const getVehicleTrail = async (vehicleId: string, date?: string) => {
   });
   const rows: any[] = Array.isArray(res.data) ? res.data : [];
   return rows
-    .map(p => ({ lat: Number(p.lat), lng: Number(p.lng) }))
+    // `t` is carried so the live breadcrumb can be joined to this without
+    // overlapping it -- without a time to compare, the two segments replay the
+    // same stretch and the line doubles back on itself.
+    .map(p => ({ lat: Number(p.lat), lng: Number(p.lng), t: Date.parse(p.timestamp) }))
     // The fleet gateway defaults unregistered IMEIs onto real vehicles, so a
     // trail can contain points from a device 1400km away. Keep Solapur only.
-    .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng)
-              && p.lat >= 17.2 && p.lat <= 18.1 && p.lng >= 75.2 && p.lng <= 76.4);
+    .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng) && Number.isFinite(p.t)
+              && p.lat >= 17.2 && p.lat <= 18.1 && p.lng >= 75.2 && p.lng <= 76.4)
+    .sort((a, b) => a.t - b.t);
 };
 
 // --- Playback ---

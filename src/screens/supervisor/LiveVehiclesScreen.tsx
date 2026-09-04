@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import MapView, { Marker, Polyline, AnimatedRegion } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow, MapStyle, SOLAPUR_CENTER } from '../../constants/theme';
 import { authStore } from '../../stores/authStore';
@@ -24,6 +25,19 @@ const { width, height } = Dimensions.get('window');
 // RESET-<id> placeholders (one per unrecognised IMEI) reporting from Kashmir,
 // Sikkim and Ladakh, so the map filled up with vehicles at coordinates nobody
 // ever reported. A position we cannot trust is dropped, not moved.
+type TrailPoint = { lat: number; lng: number; t: number };
+
+// Anything faster than this between two fixes is a GPS spike, not travel.
+const MAX_TRAIL_KMH = 120;
+
+const metresBetween = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+  const R = 6371000, rad = (x: number) => (x * Math.PI) / 180;
+  const dLat = rad(lat2 - lat1), dLng = rad(lng2 - lng1);
+  const h = Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+};
+
 const inSolapur = (lat: number, lng: number) =>
   Number.isFinite(lat) && Number.isFinite(lng) &&
   lat >= 17.2 && lat <= 18.1 && lng >= 75.2 && lng <= 76.4;
@@ -47,11 +61,14 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
   // Breadcrumb accumulated from socket events since the screen opened, plus
   // today's recorded path fetched on tap. Kept in a ref so appending a point
   // does not re-render every marker; trailVersion nudges the memo instead.
-  const trails = useRef<Map<string, { lat: number; lng: number }[]>>(new Map());
-  const [historyTrail, setHistoryTrail] = useState<{ lat: number; lng: number }[]>([]);
+  const trails = useRef<Map<string, TrailPoint[]>>(new Map());
+  const [historyTrail, setHistoryTrail] = useState<TrailPoint[]>([]);
   const [trailVersion, setTrailVersion] = useState(0);
 
-  useEffect(() => {
+  // Extracted so it can run again when the tab regains focus. Even with stable
+  // screen identity, a stale roster leaves a vehicle missing until the next
+  // socket event; refetching on focus makes the map correct immediately.
+  const loadVehicles = useCallback(() => {
     getActiveVehicles().then((list: any[]) => {
       if (!Array.isArray(list)) return;
       const map = new Map<string, VehiclePosition>();
@@ -79,8 +96,20 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
           }));
         }
       });
-      setVehicles(new Map(map));
+      // Merge rather than replace: a socket update that arrived before this
+      // request resolved must not be thrown away.
+      setVehicles(prev => {
+        const next = new Map(map);
+        for (const [id, p] of prev) if (!next.has(id)) next.set(id, p);
+        return next;
+      });
     }).catch(() => {});
+  }, []);
+
+  useFocusEffect(useCallback(() => { loadVehicles(); }, [loadVehicles]));
+
+  useEffect(() => {
+    loadVehicles();
 
     const unsub = subscribeAllVehicles((pos: VehiclePosition) => {
       const lat = Number(pos.lat);
@@ -97,8 +126,9 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
         // parked vehicle does not pile up thousands of identical points.
         const trail = trails.current.get(pos.vehicleId) || [];
         const last = trail[trail.length - 1];
+        const t = Date.parse(pos.timestamp) || Date.now();
         if (!last || Math.abs(last.lat - lat) > 1e-5 || Math.abs(last.lng - lng) > 1e-5) {
-          trail.push({ lat, lng });
+          trail.push({ lat, lng, t });
           if (trail.length > 500) trail.shift();
           trails.current.set(pos.vehicleId, trail);
           setTrailVersion(v => v + 1);
@@ -161,10 +191,26 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
   const selectedTrail = React.useMemo(() => {
     if (!selectedVehicle) return [];
     const live = trails.current.get(selectedVehicle.vehicleId) || [];
-    const out: { lat: number; lng: number }[] = [];
-    for (const p of [...historyTrail, ...live]) {
+
+    // The breadcrumb starts when the screen opens; the history covers the whole
+    // day, so the two overlap. Appending blindly replayed that shared stretch
+    // and the line jumped back to where the vehicle had already been. Keep only
+    // breadcrumb points newer than the last history point.
+    const cutoff = historyTrail.length ? historyTrail[historyTrail.length - 1].t : -Infinity;
+    const merged = [...historyTrail, ...live.filter(p => p.t > cutoff)].sort((a, b) => a.t - b.t);
+
+    const out: TrailPoint[] = [];
+    for (const p of merged) {
       const prev = out[out.length - 1];
-      if (!prev || Math.abs(prev.lat - p.lat) > 1e-7 || Math.abs(prev.lng - p.lng) > 1e-7) out.push(p);
+      if (!prev) { out.push(p); continue; }
+      // Skip repeats that are invisible at map zoom.
+      const d = metresBetween(prev.lat, prev.lng, p.lat, p.lng);
+      if (d < 1) continue;
+      // A fix implying an impossible speed is a bad GPS reading, not a
+      // journey. Drawing it puts a straight spike across the map.
+      const dt = (p.t - prev.t) / 1000;
+      if (dt > 0 && dt < 120 && (d / dt) * 3.6 > MAX_TRAIL_KMH) continue;
+      out.push(p);
     }
     return out;
   }, [selectedVehicle, historyTrail, trailVersion]);

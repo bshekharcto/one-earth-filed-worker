@@ -1,4 +1,4 @@
-﻿import React from 'react';
+﻿import React, { useCallback } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, View, StyleSheet, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -43,6 +43,17 @@ export const AppNavigator: React.FC<Props> = ({ user, onLogout }) => {
   const bottomPadding = Platform.OS === 'android' ? Math.max(insets.bottom + 22, 30) : Math.max(insets.bottom, 14);
   const tabHeight = 62 + bottomPadding;
 
+  // React Navigation compares the `children` function by identity. An inline
+  // arrow is a new function on every render of this component, so the screen
+  // it renders is torn down and rebuilt -- which is why a tracked vehicle
+  // vanished after switching tabs and coming back: the marker map, the
+  // AnimatedRegions and the socket subscription all went with it.
+  const renderWorkerDashboard = useCallback(() => <WorkerDashboardScreen onLogout={onLogout} />, [onLogout]);
+  const renderD2D = useCallback(() => <D2DScreen onLogout={onLogout} />, [onLogout]);
+  const renderLiveWorkers = useCallback(() => <LiveWorkersScreen onLogout={onLogout} />, [onLogout]);
+  const renderLiveVehicles = useCallback(() => <LiveVehiclesScreen onLogout={onLogout} />, [onLogout]);
+  const renderPlayback = useCallback(() => <PlaybackScreen onLogout={onLogout} />, [onLogout]);
+
   const getTabOptions = () => ({
     headerShown: false,
     tabBarStyle: {
@@ -67,7 +78,7 @@ export const AppNavigator: React.FC<Props> = ({ user, onLogout }) => {
       <Tab.Navigator screenOptions={getTabOptions()}>
         <Tab.Screen
           name="Home"
-          children={() => <WorkerDashboardScreen onLogout={onLogout} />}
+          children={renderWorkerDashboard}
           options={{
             title: t.home,
             tabBarIcon: ({ focused, color }) => (
@@ -79,7 +90,7 @@ export const AppNavigator: React.FC<Props> = ({ user, onLogout }) => {
         {SHOW_D2D_TAB && (
         <Tab.Screen
           name="D2D"
-          children={() => <D2DScreen onLogout={onLogout} />}
+          children={renderD2D}
           options={{
             title: t.d2d,
             tabBarIcon: ({ focused }) => (
@@ -98,7 +109,7 @@ export const AppNavigator: React.FC<Props> = ({ user, onLogout }) => {
     <Tab.Navigator screenOptions={getTabOptions()}>
       <Tab.Screen
         name="Workers"
-        children={() => <LiveWorkersScreen onLogout={onLogout} />}
+        children={renderLiveWorkers}
         options={{
           title: t.workers,
           tabBarIcon: ({ focused }) => (
@@ -110,7 +121,7 @@ export const AppNavigator: React.FC<Props> = ({ user, onLogout }) => {
       {SHOW_VEHICLES_TAB && (
       <Tab.Screen
         name="Vehicles"
-        children={() => <LiveVehiclesScreen onLogout={onLogout} />}
+        children={renderLiveVehicles}
         options={{
           title: t.vehicles,
           tabBarIcon: ({ focused }) => (
@@ -122,7 +133,7 @@ export const AppNavigator: React.FC<Props> = ({ user, onLogout }) => {
       )}
       <Tab.Screen
         name="Playback"
-        children={() => <PlaybackScreen onLogout={onLogout} />}
+        children={renderPlayback}
         options={{
           title: t.playback,
           tabBarIcon: ({ focused }) => (
@@ -134,7 +145,7 @@ export const AppNavigator: React.FC<Props> = ({ user, onLogout }) => {
       {SHOW_D2D_TAB && (
       <Tab.Screen
         name="D2D"
-        children={() => <D2DScreen onLogout={onLogout} />}
+        children={renderD2D}
         options={{
           title: t.d2d,
           tabBarIcon: ({ focused }) => (
