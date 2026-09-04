@@ -53,11 +53,15 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
   const [speedMultiplier, setSpeedMultiplier] = useState(1);
   const [currentPointIndex, setCurrentPointIndex] = useState(0);
   const [entities, setEntities] = useState<any[]>([]);
+  const [followMarker, setFollowMarker] = useState(true);
 
   const animFrameRef = useRef<number>(0);
   const playbackProgressRef = useRef<number>(0);
   const scrubbingRef = useRef(false);
   const resumeAfterScrubRef = useRef(false);
+  const followRef = useRef(true);
+  const lastCamMoveRef = useRef(0);
+  const lastCamTargetRef = useRef<{ lat: number; lng: number } | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
   const playbackStartRealTimeRef = useRef<number>(0);
   const playbackStartTrackTimeRef = useRef<number>(0);
@@ -156,6 +160,33 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
     return Number.isFinite(d) && d > 0 ? d : 0;
   }, [track]);
 
+  // Keep the camera on the playhead.
+  //
+  // Throttled deliberately: onValueChange fires on every slider pixel, and
+  // handing the native map a fresh camera 60x a second makes it stutter and
+  // never settle. Scrubbing gets a shorter gap and duration than playback so
+  // the drag still feels direct.
+  const followCamera = useCallback((lat: number, lng: number) => {
+    if (!followRef.current || !mapRef.current) return;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+    const scrubbing = scrubbingRef.current;
+    const now = performance.now();
+    if (now - lastCamMoveRef.current < (scrubbing ? 90 : 300)) return;
+
+    // Sub-metre moves are invisible at map zoom and only cost a native call.
+    const prev = lastCamTargetRef.current;
+    if (prev && Math.abs(prev.lat - lat) < 1e-5 && Math.abs(prev.lng - lng) < 1e-5) return;
+
+    lastCamMoveRef.current = now;
+    lastCamTargetRef.current = { lat, lng };
+    // center only -- this preserves whatever zoom the supervisor has chosen.
+    mapRef.current.animateCamera(
+      { center: { latitude: lat, longitude: lng } },
+      { duration: scrubbing ? 120 : 450 },
+    );
+  }, []);
+
   // Place the marker at an arbitrary progress. Shared by the animation loop and
   // the slider, so scrubbing lands exactly where playback would have been.
   const applyProgress = useCallback((progress: number) => {
@@ -180,6 +211,7 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
         // set directly. Easing toward each point would only add lag.
         const interp = lerpPosition(p1, p2, Math.min(1, Math.max(0, frac)));
         markerAnim.setValue({ latitude: interp.lat, longitude: interp.lng, latitudeDelta: 0, longitudeDelta: 0 });
+        followCamera(interp.lat, interp.lng);
       }
       setCurrentPointIndex(idx);
     } else {
@@ -189,10 +221,11 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
         (markerAnim as any).timing({
           latitude: cur.lat, longitude: cur.lng, duration: 300, useNativeDriver: false,
         }).start();
+        followCamera(cur.lat, cur.lng);
       }
       setCurrentPointIndex(idx);
     }
-  }, [track, trackDurationMs]);
+  }, [track, trackDurationMs, followCamera]);
 
   // Re-anchor the clock to a given progress. Anything that changes the rate or
   // the position must call this, or the loop measures elapsed time against a
@@ -212,6 +245,8 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
     applyProgress(p);
     rebaseClock(p);
   }, [applyProgress, rebaseClock]);
+
+  useEffect(() => { followRef.current = followMarker; }, [followMarker]);
 
   const runPlaybackLoop = useCallback((nowTime: number) => {
     if (!track || !track.points || track.points.length < 2) return;
@@ -355,6 +390,20 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
 
           <View style={styles.timeRow}>
             <Text style={styles.clockText}>{pointClock(track, currentPointIndex)}</Text>
+
+            <TouchableOpacity
+              style={[styles.followBtn, followMarker && styles.followBtnActive]}
+              onPress={() => setFollowMarker(f => !f)}
+            >
+              <Feather
+                name="crosshair"
+                size={13}
+                color={followMarker ? Colors.primary : Colors.textSecondary}
+                style={{ marginRight: 4 }}
+              />
+              <Text style={[styles.followBtnText, followMarker && styles.followBtnTextActive]}>Follow</Text>
+            </TouchableOpacity>
+
             <Text style={styles.clockText}>{Math.round(playbackProgress * 100)}%</Text>
           </View>
 
@@ -441,9 +490,17 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bgCard, borderRadius: Radius.xl, padding: Spacing.md,
     borderWidth: 1, borderColor: Colors.border, ...Shadow.lg,
   },
-  timeRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  timeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   timeText: { fontSize: 12, color: Colors.textSecondary, fontWeight: Typography.weight.semibold },
   clockText: { fontSize: 13, color: Colors.textPrimary, fontWeight: Typography.weight.bold, fontVariant: ['tabular-nums'] },
+  followBtn: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: Radius.full,
+    borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bgCard,
+  },
+  followBtnActive: { borderColor: Colors.primary, backgroundColor: '#EFF6FF' },
+  followBtnText: { fontSize: 11, color: Colors.textSecondary, fontWeight: Typography.weight.semibold },
+  followBtnTextActive: { color: Colors.primary },
   slider: { width: '100%', height: 30 },
   playBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
   playBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
