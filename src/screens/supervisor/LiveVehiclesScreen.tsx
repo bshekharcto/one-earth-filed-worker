@@ -70,6 +70,7 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
   // does not re-render every marker; trailVersion nudges the memo instead.
   const trails = useRef<Map<string, TrailPoint[]>>(new Map());
   const [historyTrail, setHistoryTrail] = useState<TrailPoint[]>([]);
+  const vehiclesRef = useRef<Map<string, VehiclePosition>>(new Map());
   const [trailVersion, setTrailVersion] = useState(0);
 
   // Extracted so it can run again when the tab regains focus. Even with stable
@@ -97,10 +98,24 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
             isMoving: spd > 2,
           };
           map.set(v.id, pos);
-          markerAnimations.current.set(v.id, new AnimatedRegion({
-            latitude: pos.lat, longitude: pos.lng,
-            latitudeDelta: 0, longitudeDelta: 0,
-          }));
+          // Update the existing AnimatedRegion; do not replace it.
+          //
+          // Marker.Animated binds to this object once. loadVehicles runs again
+          // on every tab focus, and unconditionally constructing a new
+          // AnimatedRegion swapped it out from under every marker already on
+          // the map -- the markers then had no live coordinate and vanished.
+          const existing = markerAnimations.current.get(v.id);
+          if (existing) {
+            (existing as any).setValue({
+              latitude: pos.lat, longitude: pos.lng,
+              latitudeDelta: 0, longitudeDelta: 0,
+            });
+          } else {
+            markerAnimations.current.set(v.id, new AnimatedRegion({
+              latitude: pos.lat, longitude: pos.lng,
+              latitudeDelta: 0, longitudeDelta: 0,
+            }));
+          }
         }
       });
       // Merge rather than replace: a socket update that arrived before this
@@ -125,14 +140,11 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
           latitude: lastView.lat, longitude: lastView.lng,
           latitudeDelta: 0.005, longitudeDelta: 0.005,
         }, 500);
-        setVehicles(cur => {
-          const v = cur.get(id);
-          if (v) {
-            setSelectedVehicle(v);
-            getVehicleTrail(v.vehicleId).then(setHistoryTrail).catch(() => setHistoryTrail([]));
-          }
-          return cur;
-        });
+        const v = vehiclesRef.current.get(id);
+        if (v) {
+          setSelectedVehicle(v);
+          getVehicleTrail(v.vehicleId).then(setHistoryTrail).catch(() => setHistoryTrail([]));
+        }
       }, 350);
     }
   }, [loadVehicles]));
@@ -258,6 +270,8 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
     }
     return out;
   }, [selectedVehicle, historyTrail, trailVersion]);
+
+  useEffect(() => { vehiclesRef.current = vehicles; }, [vehicles]);
 
   const visibleVehicles = Array.from(vehicles.values()).filter(v => {
     if (filterStatus === 'ALL') return true;
