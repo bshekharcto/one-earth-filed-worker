@@ -18,6 +18,16 @@ import { DateFilterBar, toDateKey } from '../../components/common/DateFilterBar'
 import { isPlaceholderVehicle } from './LiveVehiclesScreen';
 
 const { width, height } = Dimensions.get('window');
+
+// Wall-clock time of the point under the playhead, in the device's timezone --
+// a scrub is only meaningful if it says when, not just how far along.
+const pointClock = (track: PlaybackTrack | null, idx: number): string => {
+  const p = track?.points?.[idx];
+  if (!p?.timestamp) return '--:--';
+  const d = new Date(p.timestamp);
+  if (isNaN(d.getTime())) return '--:--';
+  return `${`${d.getHours()}`.padStart(2, '0')}:${`${d.getMinutes()}`.padStart(2, '0')}:${`${d.getSeconds()}`.padStart(2, '0')}`;
+};
 const SPEEDS = [1, 2, 4, 8];
 
 export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }) => {
@@ -46,6 +56,8 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
 
   const animFrameRef = useRef<number>(0);
   const playbackProgressRef = useRef<number>(0);
+  const scrubbingRef = useRef(false);
+  const resumeAfterScrubRef = useRef(false);
   const lastFrameTimeRef = useRef<number>(0);
   const playbackStartRealTimeRef = useRef<number>(0);
   const playbackStartTrackTimeRef = useRef<number>(0);
@@ -134,25 +146,89 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
     }
   };
 
-  const runPlaybackLoop = useCallback((nowTime: number) => {
+  // Total wall-clock span of the track. 0 means the timestamps carry no usable
+  // duration, which switches playback to the fixed-rate fallback below.
+  const trackDurationMs = useCallback(() => {
+    if (!track || !track.points || track.points.length < 2) return 0;
+    const a = new Date(track.points[0].timestamp).getTime();
+    const b = new Date(track.points[track.points.length - 1].timestamp).getTime();
+    const d = b - a;
+    return Number.isFinite(d) && d > 0 ? d : 0;
+  }, [track]);
+
+  // Place the marker at an arbitrary progress. Shared by the animation loop and
+  // the slider, so scrubbing lands exactly where playback would have been.
+  const applyProgress = useCallback((progress: number) => {
     if (!track || !track.points || track.points.length < 2) return;
     const points = track.points;
+    const totalMs = trackDurationMs();
 
-    const startMs = new Date(points[0].timestamp).getTime();
-    const endMs = new Date(points[points.length - 1].timestamp).getTime();
-    const totalTrackMs = endMs - startMs;
+    if (totalMs > 0) {
+      const startMs = new Date(points[0].timestamp).getTime();
+      const targetMs = startMs + progress * totalMs;
+      let idx = 0;
+      for (let i = 0; i < points.length - 1; i++) {
+        if (new Date(points[i].timestamp).getTime() <= targetMs) idx = i;
+      }
+      const p1 = points[idx];
+      const p2 = points[Math.min(idx + 1, points.length - 1)];
+      if (p1 && p2 && p1 !== p2) {
+        const t1 = new Date(p1.timestamp).getTime();
+        const t2 = new Date(p2.timestamp).getTime();
+        const frac = t2 > t1 ? (targetMs - t1) / (t2 - t1) : 0;
+        // Interpolating every frame is already continuous, so the marker is
+        // set directly. Easing toward each point would only add lag.
+        const interp = lerpPosition(p1, p2, Math.min(1, Math.max(0, frac)));
+        markerAnim.setValue({ latitude: interp.lat, longitude: interp.lng, latitudeDelta: 0, longitudeDelta: 0 });
+      }
+      setCurrentPointIndex(idx);
+    } else {
+      const idx = Math.min(points.length - 1, Math.floor(progress * (points.length - 1)));
+      const cur = points[idx];
+      if (cur) {
+        (markerAnim as any).timing({
+          latitude: cur.lat, longitude: cur.lng, duration: 300, useNativeDriver: false,
+        }).start();
+      }
+      setCurrentPointIndex(idx);
+    }
+  }, [track, trackDurationMs]);
 
-    // A track whose timestamps are all equal (or unparseable) has no duration
-    // to play against, and dividing by it yields NaN -- the marker then never
-    // moves and the bar never fills. Fall back to a fixed-rate sweep so
-    // playback still shows the route.
-    const timeDriven = Number.isFinite(totalTrackMs) && totalTrackMs > 0;
+  // Re-anchor the clock to a given progress. Anything that changes the rate or
+  // the position must call this, or the loop measures elapsed time against a
+  // stale origin -- that is why changing speed used to snap back to the start.
+  const rebaseClock = useCallback((progress: number) => {
+    const now = performance.now();
+    playbackStartTrackTimeRef.current = progress * trackDurationMs();
+    playbackStartRealTimeRef.current = now;
+    lastFrameTimeRef.current = now;
+  }, [trackDurationMs]);
 
+  // Single entry point for "put the playhead here".
+  const seekTo = useCallback((progress: number) => {
+    const p = Math.min(1, Math.max(0, progress));
+    playbackProgressRef.current = p;
+    setPlaybackProgress(p);
+    applyProgress(p);
+    rebaseClock(p);
+  }, [applyProgress, rebaseClock]);
+
+  const runPlaybackLoop = useCallback((nowTime: number) => {
+    if (!track || !track.points || track.points.length < 2) return;
+
+    // While a finger is on the slider the loop must not write progress, or it
+    // fights the drag and the thumb springs back.
+    if (scrubbingRef.current) {
+      animFrameRef.current = requestAnimationFrame(runPlaybackLoop);
+      return;
+    }
+
+    const totalMs = trackDurationMs();
     let progress: number;
-    if (timeDriven) {
+    if (totalMs > 0) {
       const realElapsedMs = nowTime - playbackStartRealTimeRef.current;
       const trackElapsedMs = playbackStartTrackTimeRef.current + realElapsedMs * speedMultiplier;
-      progress = Math.min(1, Math.max(0, trackElapsedMs / totalTrackMs));
+      progress = Math.min(1, Math.max(0, trackElapsedMs / totalMs));
     } else {
       const elapsedSec = (nowTime - lastFrameTimeRef.current) / 1000;
       progress = Math.min(1, playbackProgressRef.current + elapsedSec * speedMultiplier * 0.15);
@@ -160,71 +236,34 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
     lastFrameTimeRef.current = nowTime;
     playbackProgressRef.current = progress;
     setPlaybackProgress(progress);
-
-    // Locate the segment the playhead is inside. Time-driven playback dwells
-    // where the subject actually dwelled; indexing by point number instead
-    // would give a parked vehicle the same screen time as a moving one.
-    let idx = 0;
-    if (timeDriven) {
-      const targetTimeMs = startMs + progress * totalTrackMs;
-      for (let i = 0; i < points.length - 1; i++) {
-        if (new Date(points[i].timestamp).getTime() <= targetTimeMs) idx = i;
-      }
-      const p1 = points[idx];
-      const p2 = points[Math.min(idx + 1, points.length - 1)];
-      if (p1 && p2 && p1 !== p2) {
-        const t1 = new Date(p1.timestamp).getTime();
-        const t2 = new Date(p2.timestamp).getTime();
-        const frac = t2 > t1 ? (targetTimeMs - t1) / (t2 - t1) : 0;
-        // Interpolating every frame is already continuous, so the marker is
-        // set directly. Easing toward each point on top of this would only
-        // add lag behind the true position.
-        const interp = lerpPosition(p1, p2, Math.min(1, Math.max(0, frac)));
-        markerAnim.setValue({ latitude: interp.lat, longitude: interp.lng, latitudeDelta: 0, longitudeDelta: 0 });
-      }
-    } else {
-      idx = Math.min(points.length - 1, Math.floor(progress * (points.length - 1)));
-      const cur = points[idx];
-      if (cur) {
-        (markerAnim as any).timing({
-          latitude: cur.lat, longitude: cur.lng, duration: 300, useNativeDriver: false,
-        }).start();
-      }
-    }
-    setCurrentPointIndex(idx);
+    applyProgress(progress);
 
     if (progress < 1) {
       animFrameRef.current = requestAnimationFrame(runPlaybackLoop);
     } else {
       setIsPlaying(false);
     }
-  }, [track, speedMultiplier]);
+  }, [track, speedMultiplier, trackDurationMs, applyProgress]);
 
   useEffect(() => {
     if (isPlaying && track) {
-      lastFrameTimeRef.current = performance.now();
-      playbackStartRealTimeRef.current = performance.now();
+      // Re-anchor on every (re)start. The loop is recreated whenever speed or
+      // track changes, so this is also what makes a mid-playback speed change
+      // continue from the current position instead of restarting.
+      rebaseClock(playbackProgressRef.current);
       animFrameRef.current = requestAnimationFrame(runPlaybackLoop);
     } else {
       cancelAnimationFrame(animFrameRef.current);
     }
     return () => cancelAnimationFrame(animFrameRef.current);
-  }, [isPlaying, runPlaybackLoop]);
+  }, [isPlaying, runPlaybackLoop, rebaseClock, track]);
 
   const togglePlay = () => {
     if (!track) return;
-    if (!isPlaying) {
-      // Pressing play on a finished track restarts it rather than sitting at
-      // the end and immediately stopping again.
-      if (playbackProgressRef.current >= 1) {
-        playbackProgressRef.current = 0;
-        setPlaybackProgress(0);
-      }
-      const points = track.points;
-      const totalDurationMs = new Date(points[points.length - 1].timestamp).getTime()
-                            - new Date(points[0].timestamp).getTime();
-      playbackStartTrackTimeRef.current = playbackProgressRef.current * totalDurationMs;
-      playbackStartRealTimeRef.current = performance.now();
+    if (!isPlaying && playbackProgressRef.current >= 1) {
+      // Play on a finished track restarts it rather than sitting at the end
+      // and immediately stopping again.
+      seekTo(0);
     }
     setIsPlaying(p => !p);
   };
@@ -314,10 +353,34 @@ export const PlaybackScreen: React.FC<{ onLogout?: () => void }> = ({ onLogout }
             <Text style={styles.timeText}>{t.distance}: {(track.totalDistanceKm ?? 0).toFixed(2)} km</Text>
           </View>
 
+          <View style={styles.timeRow}>
+            <Text style={styles.clockText}>{pointClock(track, currentPointIndex)}</Text>
+            <Text style={styles.clockText}>{Math.round(playbackProgress * 100)}%</Text>
+          </View>
+
           <Slider
             style={styles.slider}
             minimumValue={0} maximumValue={1}
             value={playbackProgress}
+            onSlidingStart={() => {
+              // Pause the loop's writes for the duration of the drag, and
+              // remember whether to resume once the finger lifts.
+              scrubbingRef.current = true;
+              resumeAfterScrubRef.current = isPlaying;
+            }}
+            onValueChange={(v: number) => {
+              // Live preview: the marker tracks the thumb as it is dragged.
+              playbackProgressRef.current = v;
+              setPlaybackProgress(v);
+              applyProgress(v);
+            }}
+            onSlidingComplete={(v: number) => {
+              scrubbingRef.current = false;
+              seekTo(v);
+              // Scrubbing to the very end would otherwise stop instantly.
+              if (resumeAfterScrubRef.current && v < 1) setIsPlaying(true);
+              resumeAfterScrubRef.current = false;
+            }}
             minimumTrackTintColor={Colors.primary}
             maximumTrackTintColor={Colors.border}
             thumbTintColor={Colors.primary}
@@ -380,6 +443,7 @@ const styles = StyleSheet.create({
   },
   timeRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   timeText: { fontSize: 12, color: Colors.textSecondary, fontWeight: Typography.weight.semibold },
+  clockText: { fontSize: 13, color: Colors.textPrimary, fontWeight: Typography.weight.bold, fontVariant: ['tabular-nums'] },
   slider: { width: '100%', height: 30 },
   playBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
   playBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
