@@ -189,10 +189,15 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
   // from the DB's status string, so a tracker that stopped transmitting days
   // ago still showed as MOVING -- green for a vehicle nobody was hearing from.
   const LIVE_WINDOW_MS = 3 * 60 * 1000;
+  // Trackers and the server stamp fixes from their own clocks, which are not
+  // the phone's. A fix a few seconds in the future is ordinary skew, not a bad
+  // reading -- rejecting it (a >= 0) marked a vehicle that was transmitting
+  // right now as offline, because its timestamp was 4s ahead of the handset.
+  const CLOCK_SKEW_MS = 5 * 60 * 1000;
   const ageMs = (v: VehiclePosition) => Date.now() - new Date(v.timestamp).getTime();
   const isLive = (v: VehiclePosition) => {
     const a = ageMs(v);
-    return Number.isFinite(a) && a >= 0 && a < LIVE_WINDOW_MS;
+    return Number.isFinite(a) && a > -CLOCK_SKEW_MS && a < LIVE_WINDOW_MS;
   };
 
   const getVehicleStatus = (v: VehiclePosition): 'MOVING' | 'IDLE' | 'OFFLINE' => {
