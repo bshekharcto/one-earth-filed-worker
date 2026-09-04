@@ -27,6 +27,13 @@ const { width, height } = Dimensions.get('window');
 // ever reported. A position we cannot trust is dropped, not moved.
 type TrailPoint = { lat: number; lng: number; t: number };
 
+// Module scope on purpose: this survives the screen being unmounted and
+// rebuilt when tabs change. Component state does not, which is why switching
+// to Workers and back dropped the selected vehicle and reset the map from
+// street level to the whole city -- the marker was still there, just no longer
+// selected and no longer in view.
+const lastView = { vehicleId: null as string | null, lat: 0, lng: 0, zoomed: false };
+
 // Anything faster than this between two fixes is a GPS spike, not travel.
 const MAX_TRAIL_KMH = 120;
 
@@ -106,7 +113,29 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
     }).catch(() => {});
   }, []);
 
-  useFocusEffect(useCallback(() => { loadVehicles(); }, [loadVehicles]));
+  useFocusEffect(useCallback(() => {
+    loadVehicles();
+    // Put the camera and the selection back where they were. The map resets to
+    // initialRegion whenever it is rebuilt, so without this the vehicle being
+    // watched is left somewhere among 40+ markers at city zoom.
+    if (lastView.vehicleId && lastView.zoomed) {
+      const id = lastView.vehicleId;
+      setTimeout(() => {
+        mapRef.current?.animateToRegion({
+          latitude: lastView.lat, longitude: lastView.lng,
+          latitudeDelta: 0.005, longitudeDelta: 0.005,
+        }, 500);
+        setVehicles(cur => {
+          const v = cur.get(id);
+          if (v) {
+            setSelectedVehicle(v);
+            getVehicleTrail(v.vehicleId).then(setHistoryTrail).catch(() => setHistoryTrail([]));
+          }
+          return cur;
+        });
+      }, 350);
+    }
+  }, [loadVehicles]));
 
   useEffect(() => {
     loadVehicles();
@@ -121,6 +150,7 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
         const updated = new Map(prev);
         const cleanPos = { ...pos, lat, lng };
         updated.set(pos.vehicleId, cleanPos);
+        if (lastView.vehicleId === pos.vehicleId) { lastView.lat = lat; lastView.lng = lng; }
 
         // Append to this vehicle's breadcrumb, skipping sub-metre repeats so a
         // parked vehicle does not pile up thousands of identical points.
@@ -171,8 +201,17 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
     return 'IDLE';
   };
 
+  const clearSelection = () => {
+    setSelectedVehicle(null);
+    setHistoryTrail([]);
+    lastView.vehicleId = null;
+    lastView.zoomed = false;
+  };
+
   const onMarkerPress = (v: VehiclePosition) => {
     setSelectedVehicle(v);
+    lastView.vehicleId = v.vehicleId;
+    lastView.lat = v.lat; lastView.lng = v.lng; lastView.zoomed = true;
     mapRef.current?.animateToRegion({
       latitude: v.lat, longitude: v.lng,
       latitudeDelta: 0.005, longitudeDelta: 0.005,
@@ -314,7 +353,7 @@ export const LiveVehiclesScreen: React.FC<{ onLogout?: () => void }> = ({ onLogo
         <View style={styles.vehiclePanel}>
           <View style={styles.vehiclePanelRow}>
             <Text style={styles.vehiclePanelName}>{selectedVehicle.registrationNumber}</Text>
-            <TouchableOpacity onPress={() => setSelectedVehicle(null)}>
+            <TouchableOpacity onPress={clearSelection}>
               <Feather name="x" size={20} color={Colors.textSecondary} />
             </TouchableOpacity>
           </View>

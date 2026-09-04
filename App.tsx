@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect, useCallback } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -24,6 +24,12 @@ export default function App() {
     setInitializing(false);
   }, []);
 
+  // Stable identity. As an inline arrow this was a new function on every
+  // render, which propagated into AppNavigator's memoised screen callbacks and
+  // remounted every tab screen -- losing the selected vehicle and the map
+  // camera each time you switched tabs.
+  const handleLogout = useCallback(() => { authStore.logout(); setUser(null); }, []);
+
   if (initializing) return null;
 
   return (
@@ -36,10 +42,10 @@ export default function App() {
           // needs foreground location for the map.
           <PermissionGate
             requireBackground={user.role === 'WORKER'}
-            onLogout={() => { authStore.logout(); setUser(null); }}
+            onLogout={handleLogout}
           >
             <NavigationContainer>
-              <AppNavigator user={user} onLogout={() => { authStore.logout(); setUser(null); }} />
+              <AppNavigator user={user} onLogout={handleLogout} />
             </NavigationContainer>
           </PermissionGate>
         ) : (
